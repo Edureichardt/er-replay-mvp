@@ -280,7 +280,7 @@ function AuthScreen({ onAuth }: { onAuth: (data: AuthData) => void }) {
                 : "Voltar para o login"}
           </button>
           <small className="demo-login">
-            Administrador: admin@erreplay.com / erreplay123
+            
           </small>
         </div>
       </section>
