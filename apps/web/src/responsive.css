@@ -1,0 +1,74 @@
+.replay-actions button.share {
+  border-color: #ffffff17;
+  background: #ffffff09;
+  color: #bca4ee;
+}
+
+@media (max-width: 650px) {
+  .auth-page {
+    grid-template-columns: 1fr;
+  }
+  .auth-pitch {
+    min-height: 250px;
+    padding: 28px 20px;
+  }
+  .auth-pitch h1 {
+    font-size: 43px;
+  }
+  .auth-box {
+    padding: 14px;
+  }
+  .auth-card {
+    padding: 24px 19px;
+  }
+  .overview,
+  .cameras-section {
+    margin-left: 12px;
+    margin-right: 12px;
+    padding: 19px;
+  }
+  .overview-head {
+    align-items: flex-start;
+    gap: 14px;
+  }
+  .overview-head button {
+    white-space: nowrap;
+  }
+  .security-grid {
+    grid-template-columns: 1fr;
+  }
+  .arena-form,
+  .camera-form {
+    grid-template-columns: 1fr;
+  }
+  .camera-form .wide {
+    grid-column: auto;
+  }
+  .form-actions,
+  .edit-actions {
+    flex-wrap: wrap;
+  }
+  .form-actions button,
+  .edit-actions button {
+    flex: 1;
+  }
+  .replay-actions {
+    flex-direction: row !important;
+  }
+}
+
+@media (max-width: 390px) {
+  .overview-head {
+    flex-direction: column;
+  }
+  .overview-head button {
+    width: 100%;
+    justify-content: center;
+  }
+  .auth-pitch h1 {
+    font-size: 38px;
+  }
+  .auth-pitch p {
+    font-size: 14px;
+  }
+}

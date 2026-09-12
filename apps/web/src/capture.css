@@ -1,0 +1,18 @@
+.camera-list article.capturing {
+  border-color: #44d8a052;
+  box-shadow: inset 0 0 0 1px #44d8a014;
+}
+.camera-list article.capturing .camera-info small {
+  color: #70e9ba;
+  font-weight: 700;
+}
+.camera-buttons .start-ip {
+  color: #79e8bc;
+  border-color: #45d99f35;
+  background: #45d99f10;
+}
+.camera-buttons .stop-ip {
+  color: #ff91a4;
+  border-color: #ff607c35;
+  background: #ff607c10;
+}

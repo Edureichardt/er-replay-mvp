@@ -1,0 +1,219 @@
+.overview {
+  max-width: 1132px;
+  margin: 0 auto 28px;
+  padding: 28px;
+  border: 1px solid #ffffff12;
+  background: #171020cc;
+  border-radius: 22px;
+}
+.overview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.overview-head h2 {
+  font-family: Manrope;
+  font-size: 28px;
+  margin: 8px 0;
+}
+.overview-head p {
+  color: #93829e;
+  margin: 0;
+}
+.overview-head > button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #9564ff55;
+  background: #8b5cf61b;
+  color: #c4a6ff;
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.overview-head > button svg {
+  width: 18px;
+}
+.arena-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  align-items: end;
+  gap: 12px;
+  padding: 18px;
+  margin-bottom: 18px;
+  border: 1px solid #ffffff13;
+  background: #0e0816;
+  border-radius: 14px;
+}
+.arena-form label {
+  display: grid;
+  gap: 7px;
+  color: #c7b9ce;
+  font-size: 12px;
+  font-weight: 600;
+}
+.arena-form input,
+.arena-form select {
+  border: 1px solid #ffffff18;
+  background: #181020;
+  color: #f8f3ff;
+  border-radius: 9px;
+  padding: 12px;
+  outline: none;
+}
+.arena-form button {
+  height: 42px;
+  padding-inline: 18px;
+}
+.security-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.security-grid > article {
+  overflow: hidden;
+  border: 1px solid #ffffff12;
+  background: #0e0816;
+  border-radius: 16px;
+}
+.security-feed {
+  aspect-ratio: 16/9;
+  position: relative;
+  background: linear-gradient(145deg, #120b19, #08050c);
+  overflow: hidden;
+}
+.security-feed > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.security-feed > div {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 9px;
+  color: #6f6079;
+}
+.security-feed > div svg {
+  width: 38px;
+  height: 38px;
+}
+.security-feed > div span {
+  font-size: 12px;
+}
+.feed-status {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #08050dcc;
+  border: 1px solid #ffffff1a;
+  border-radius: 99px;
+  padding: 6px 9px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.feed-status i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8e7c99;
+}
+.feed-status.online {
+  color: #75edbd;
+}
+.feed-status.online i {
+  background: #42dda3;
+  box-shadow: 0 0 8px #42dda3;
+}
+.court-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 15px 8px;
+}
+.court-row > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.court-row strong {
+  font-family: Manrope;
+}
+.court-row small {
+  color: #81718b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mini-qr {
+  position: relative;
+  background: white;
+  padding: 4px;
+  border-radius: 7px;
+  line-height: 0;
+}
+.qr-tooltip {
+  display: none;
+}
+.security-grid article > a {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 15px 14px;
+  color: #b896ff;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 700;
+}
+.security-grid article > a svg {
+  width: 14px;
+}
+.overview .camera-notice {
+  margin-bottom: 18px;
+}
+@media (max-width: 800px) {
+  .overview {
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+  .security-grid {
+    grid-template-columns: 1fr;
+  }
+  .arena-form {
+    grid-template-columns: 1fr 1fr;
+  }
+  .arena-form button {
+    grid-column: 1/-1;
+  }
+}
+@media (max-width: 520px) {
+  .overview {
+    padding: 19px;
+  }
+  .overview-head {
+    align-items: flex-start;
+  }
+  .overview-head h2 {
+    font-size: 23px;
+  }
+  .overview-head > button {
+    font-size: 0;
+    padding: 10px;
+  }
+  .arena-form {
+    grid-template-columns: 1fr;
+  }
+  .arena-form button {
+    grid-column: auto;
+  }
+}

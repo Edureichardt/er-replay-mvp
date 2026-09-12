@@ -1,0 +1,15 @@
+.camera-card .ip-preview {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.camera-placeholder.rtsp-active {
+  z-index: 1;
+  color: #a990b8;
+  text-align: center;
+}
+.camera-placeholder.rtsp-active small {
+  max-width: 280px;
+  color: #756680;
+}

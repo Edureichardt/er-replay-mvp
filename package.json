@@ -1,0 +1,19 @@
+{
+  "name": "er-replay-mvp",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n API,WEB -c magenta,cyan \"npm run dev -w @er-replay/api\" \"npm run dev -w @er-replay/web\"",
+    "build": "npm run build -w @er-replay/api && npm run build -w @er-replay/web",
+    "start": "npm run start -w @er-replay/api",
+    "typecheck": "npm run typecheck -w @er-replay/api && npm run typecheck -w @er-replay/web",
+    "beta:build": "npm run build -w @er-replay/api && npm run build -w @er-replay/web",
+    "beta:api": "npm run start -w @er-replay/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

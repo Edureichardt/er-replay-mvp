@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env*
+!.env.example
+!.env.production.example
+!apps/web/.env.production.example
+apps/api/storage/segments/
+apps/api/storage/replays/*.mp4
+!apps/api/storage/replays/.gitkeep
+*.log
+*.tsbuildinfo
+# Dados locais da aplicação
+apps/api/storage/database.json
+apps/api/storage/replays/*
+!apps/api/storage/replays/.gitkeep

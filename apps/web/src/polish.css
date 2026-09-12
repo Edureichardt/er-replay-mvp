@@ -1,0 +1,109 @@
+.brand > img {
+  width: 58px;
+  height: 38px;
+  object-fit: contain;
+  filter: drop-shadow(0 5px 14px #7d3fe055);
+}
+.dashboard-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.dashboard-stats > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid #ffffff10;
+  border-radius: 13px;
+  background: linear-gradient(145deg, #1a1025, #110a19);
+}
+.dashboard-stats svg {
+  width: 21px;
+  color: #a879ff;
+}
+.dashboard-stats span {
+  display: flex;
+  flex-direction: column;
+}
+.dashboard-stats strong {
+  font-family: Manrope;
+  font-size: 20px;
+}
+.dashboard-stats small {
+  font-size: 10px;
+  color: #82738c;
+}
+.replay-actions {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 7px;
+}
+.replay-actions button {
+  display: grid;
+  place-items: center;
+  border: 1px solid #ff6b841f;
+  background: #ff5e7811;
+  color: #ff8ca0;
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+}
+.replay-grid article > div > div small {
+  font-size: 10px;
+  color: #6f6177;
+}
+.auth-card,
+.camera-area,
+.overview,
+.cameras-section,
+.gallery {
+  box-shadow: 0 22px 65px #05020842;
+}
+.topbar {
+  box-shadow: 0 8px 35px #0003;
+}
+@media (max-width: 800px) {
+  .dashboard-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 450px) {
+  .dashboard-stats {
+    grid-template-columns: 1fr;
+  }
+  .brand > img {
+    width: 48px;
+  }
+  .replay-grid article > div {
+    align-items: flex-start;
+  }
+  .replay-actions {
+    flex-direction: column !important;
+    align-items: stretch;
+  }
+}
+.player-features {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 22px;
+}
+.player-features span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 11px;
+  border: 1px solid #ffffff10;
+  border-radius: 99px;
+  background: #ffffff06;
+  color: #8f8099;
+  font-size: 11px;
+}
+.player-features svg {
+  width: 14px;
+  color: #a87bff;
+}

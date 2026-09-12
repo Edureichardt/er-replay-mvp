@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  DEVELOPER
+  ADMIN
+  PLAYER
+}
+enum CameraType {
+  WEBCAM
+  RTSP
+  MJPEG
+}
+enum CameraStatus {
+  UNTESTED
+  ONLINE
+  OFFLINE
+}
+
+model User {
+  id               String   @id @default(uuid())
+  name             String
+  email            String   @unique
+  passwordHash     String
+  role             Role     @default(PLAYER)
+  createdAt        DateTime @default(now())
+  licenseExpiresAt DateTime?
+  licenseDays      Int?
+  accessActive     Boolean  @default(true)
+  lastPaymentAt    DateTime?
+  ownedArenas      Arena[]  @relation("ArenaOwner")
+  arenaId          String?
+  arena            Arena?   @relation("ArenaPlayers", fields: [arenaId], references: [id], onDelete: SetNull)
+  replays          Replay[]
+  @@index([arenaId])
+}
+
+model Arena {
+  id             String   @id @default(uuid())
+  name           String
+  code           String   @unique
+  defaultSeconds Int      @default(30)
+  retentionDays  Int      @default(7)
+  watermarkUrl   String?
+  activeCameraId String?
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  ownerId        String?
+  owner          User?    @relation("ArenaOwner", fields: [ownerId], references: [id])
+  cameras        Camera[]
+  replays        Replay[]
+  players        User[]   @relation("ArenaPlayers")
+  @@index([ownerId])
+}
+
+model Camera {
+  id String @id @default(uuid())
+  arenaId String
+  arena Arena @relation(fields: [arenaId], references: [id], onDelete: Cascade)
+  name String
+  type CameraType
+  host String
+  port Int @default(554)
+  username String?
+  password String?
+  path String
+  transport String @default("tcp")
+  active Boolean @default(true)
+  status CameraStatus @default(UNTESTED)
+  lastTestedAt DateTime?
+  lastError String?
+  createdAt DateTime @default(now())
+  replays Replay[]
+}
+
+model Replay {
+  id String @id @default(uuid())
+  cameraId String
+  camera Camera @relation(fields: [cameraId], references: [id])
+  arenaId String
+  arena Arena @relation(fields: [arenaId], references: [id])
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  seconds Int
+  filename String
+  url String
+  cloudPublicId String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  @@index([userId, createdAt])
+  @@index([arenaId, createdAt])
+  @@index([expiresAt])
+}

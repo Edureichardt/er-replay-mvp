@@ -1,0 +1,231 @@
+.cameras-section {
+  max-width: 1132px;
+  margin: 0 auto 28px;
+  padding: 28px;
+  border: 1px solid #ffffff12;
+  background: #171020cc;
+  border-radius: 22px;
+}
+.cameras-section .section-title {
+  align-items: center;
+  margin-bottom: 8px;
+}
+.section-intro {
+  color: #93829e;
+  margin: 0 0 24px;
+  max-width: 680px;
+  line-height: 1.55;
+}
+.add-camera {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #9564ff55;
+  background: #8b5cf61b;
+  color: #c4a6ff;
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.add-camera svg {
+  width: 18px;
+}
+.camera-form {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 15px;
+  padding: 21px;
+  margin: 20px 0;
+  border: 1px solid #ffffff13;
+  background: #0e0816;
+  border-radius: 15px;
+}
+.camera-form label {
+  display: grid;
+  gap: 7px;
+  color: #c7b9ce;
+  font-size: 12px;
+  font-weight: 600;
+}
+.camera-form input,
+.camera-form select {
+  min-width: 0;
+  border: 1px solid #ffffff18;
+  background: #181020;
+  color: #f8f3ff;
+  border-radius: 9px;
+  padding: 12px;
+  outline: none;
+}
+.camera-form input:focus,
+.camera-form select:focus {
+  border-color: #8b5cf6;
+}
+.camera-form .wide {
+  grid-column: span 2;
+}
+.camera-form small {
+  color: #756680;
+  font-weight: 400;
+}
+.form-actions {
+  grid-column: 1/-1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.form-actions button {
+  border: 1px solid #ffffff18;
+  background: #ffffff08;
+  color: #c9bbd0;
+  border-radius: 9px;
+  padding: 11px 15px;
+  cursor: pointer;
+}
+.form-actions .primary {
+  background: #8b5cf6;
+  color: white;
+}
+.camera-notice {
+  margin: 15px 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #8b5cf616;
+  border: 1px solid #8b5cf62c;
+  color: #cab6f5;
+  font-size: 13px;
+}
+.camera-list {
+  display: grid;
+  gap: 10px;
+}
+.camera-list article {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 15px;
+  padding: 16px;
+  border: 1px solid #ffffff10;
+  border-radius: 14px;
+  background: #100918;
+}
+.camera-status {
+  width: 50px;
+  height: 50px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  background: #ffffff09;
+  color: #887995;
+}
+.camera-status > svg:first-child {
+  width: 25px;
+}
+.camera-status > svg:last-child {
+  position: absolute;
+  width: 15px;
+  right: -3px;
+  bottom: -3px;
+  background: #171020;
+  border-radius: 50%;
+}
+.camera-status.online {
+  color: #69e7b7;
+  background: #42d99f16;
+}
+.camera-status.offline {
+  color: #ff738e;
+  background: #ff526d14;
+}
+.camera-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.camera-info span {
+  font-family: monospace;
+  color: #9988a3;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.camera-info small {
+  color: #776982;
+}
+.camera-buttons {
+  display: flex;
+  gap: 7px;
+}
+.camera-buttons button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #ffffff15;
+  background: #ffffff08;
+  color: #cbbdd2;
+  border-radius: 9px;
+  padding: 9px 11px;
+  cursor: pointer;
+}
+.camera-buttons svg {
+  width: 16px;
+}
+.camera-buttons .remove {
+  color: #ff8398;
+  padding: 9px;
+}
+.camera-buttons button:disabled {
+  opacity: 0.5;
+}
+@media (max-width: 800px) {
+  .cameras-section {
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+  .camera-form {
+    grid-template-columns: 1fr 1fr;
+  }
+  .camera-list article {
+    grid-template-columns: auto 1fr;
+  }
+  .camera-buttons {
+    grid-column: 1/-1;
+    justify-content: flex-end;
+  }
+}
+@media (max-width: 520px) {
+  .cameras-section {
+    padding: 19px;
+  }
+  .cameras-section .section-title {
+    align-items: flex-start;
+    gap: 15px;
+  }
+  .add-camera {
+    font-size: 0;
+    padding: 10px;
+  }
+  .camera-form {
+    grid-template-columns: 1fr;
+  }
+  .camera-form .wide {
+    grid-column: auto;
+  }
+  .camera-list article {
+    grid-template-columns: 1fr;
+  }
+  .camera-status {
+    display: none;
+  }
+  .camera-buttons {
+    justify-content: stretch;
+  }
+  .camera-buttons button:first-child {
+    flex: 1;
+    justify-content: center;
+  }
+}
