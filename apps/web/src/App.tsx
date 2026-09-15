@@ -1611,6 +1611,8 @@ type DeveloperClient = User & {
   lastPaymentAt?: string;
 };
 
+type CaptureAgentInfo = { id:string; ownerId:string; name:string; machineName?:string; active:boolean; lastSeenAt?:string; createdAt:string; online:boolean };
+
 type DeveloperData = {
   totals: {
     arenas: number;
@@ -1634,6 +1636,7 @@ function DeveloperPage({
 }) {
   const [data, setData] = useState<DeveloperData>();
   const [clients, setClients] = useState<DeveloperClient[]>([]);
+  const [agents, setAgents] = useState<CaptureAgentInfo[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState("");
@@ -1642,10 +1645,12 @@ function DeveloperPage({
     Promise.all([
       api("/api/developer/overview", {}, auth.token),
       api("/api/developer/clients", {}, auth.token),
+      api("/api/developer/agents", {}, auth.token),
     ])
-      .then(([overview, clientList]) => {
+      .then(([overview, clientList, agentList]) => {
         setData(overview);
         setClients(clientList);
+        setAgents(agentList);
         setError("");
       })
       .catch((error) => setError(error.message));
@@ -1712,6 +1717,25 @@ function DeveloperPage({
       await api(`/api/developer/clients/${client.id}/reset-password`, { method: "POST", body: JSON.stringify({ password }) }, auth.token);
       setNotice(`Nova senha definida para ${client.name}. Agora você pode repassá-la ao cliente.`);
     } catch (error) { setError(error instanceof Error ? error.message : "Erro ao redefinir senha."); }
+    finally { setBusy(""); }
+  }
+
+  async function generateAgentCode(client: DeveloperClient) {
+    setBusy(`pair-${client.id}`); setError("");
+    try {
+      const result = await api(`/api/developer/clients/${client.id}/agent-pairing`, { method: "POST" }, auth.token);
+      const expires = new Date(result.expiresAt).toLocaleTimeString("pt-BR", {hour:"2-digit",minute:"2-digit"});
+      setNotice(`Código do Agent para ${client.name}: ${result.code} • válido até ${expires}. Use uma única vez no PC da arena.`);
+      try { await navigator.clipboard.writeText(result.code); } catch {}
+    } catch (error) { setError(error instanceof Error ? error.message : "Erro ao gerar código do Agent."); }
+    finally { setBusy(""); }
+  }
+
+  async function revokeCaptureAgent(agent: CaptureAgentInfo) {
+    if (!window.confirm(`Revogar o Agent ${agent.machineName || agent.name}? Ele perderá o acesso imediatamente.`)) return;
+    setBusy(`agent-${agent.id}`); setError("");
+    try { await api(`/api/developer/agents/${agent.id}/revoke`, {method:"POST"}, auth.token); setNotice("Capture Agent revogado."); load(); }
+    catch(error){ setError(error instanceof Error ? error.message : "Erro ao revogar Agent."); }
     finally { setBusy(""); }
   }
 
@@ -1793,12 +1817,29 @@ function DeveloperPage({
                 <div className="license-actions">
                   <button className="pay" disabled={busy === client.id} onClick={() => void renew(client)}><CheckCircle2 /> CONFIRMAR PAGAMENTO</button>
                   <button disabled={busy === client.id} onClick={() => void resetClientPassword(client)}><KeyRound /> NOVA SENHA</button>
+                  <button disabled={busy === `pair-${client.id}`} onClick={() => void generateAgentCode(client)}><Radio /> GERAR CÓDIGO AGENT</button>
                   <button className={client.accessActive === false ? "unlock" : "block"} disabled={busy === client.id} onClick={() => void toggleAccess(client)}>{client.accessActive === false ? <Play /> : <CircleStop />} {client.accessActive === false ? "DESBLOQUEAR" : "BLOQUEAR"}</button>
                 </div>
               </article>
             );
           })}
           {!clients.length && <div className="empty-license">Nenhuma conta de arena criada ainda.</div>}
+        </div>
+      </section>
+
+      <section className="license-manager">
+        <div className="section-title"><div><span>CAPTURE AGENTS</span><h2>Computadores pareados</h2></div><Radio /></div>
+        <div className="agent-pair-grid">
+          {agents.map((agent) => {
+            const client = clients.find(c => c.id === agent.ownerId);
+            return <article className="agent-pair-card" key={agent.id}>
+              <div><strong>{agent.machineName || agent.name}</strong><small>{client?.name || "Cliente"}</small></div>
+              <em className={agent.online ? "online" : "offline"}>{agent.active ? (agent.online ? "ONLINE" : "OFFLINE") : "REVOGADO"}</em>
+              <span>Último contato: {agent.lastSeenAt ? new Date(agent.lastSeenAt).toLocaleString("pt-BR") : "—"}</span>
+              {agent.active && <button disabled={busy === `agent-${agent.id}`} onClick={() => void revokeCaptureAgent(agent)}><CircleStop /> REVOGAR</button>}
+            </article>;
+          })}
+          {!agents.length && <div className="empty-license">Nenhum Capture Agent pareado ainda.</div>}
         </div>
       </section>
 

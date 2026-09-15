@@ -13,3 +13,4 @@ apps/api/storage/replays/*.mp4
 apps/api/storage/database.json
 apps/api/storage/replays/*
 !apps/api/storage/replays/.gitkeep
+apps/agent/agent-credentials.json

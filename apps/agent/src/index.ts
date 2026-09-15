@@ -1,13 +1,14 @@
 import "dotenv/config";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdir, readdir, stat, writeFile, unlink } from "node:fs/promises";
+import { mkdir, readdir, stat, writeFile, unlink, readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 const API = (process.env.API_URL ?? "").replace(/\/$/, "");
-const EMAIL = process.env.ADMIN_EMAIL ?? "";
-const PASSWORD = process.env.ADMIN_PASSWORD ?? "";
+const PAIRING_CODE = process.env.PAIRING_CODE ?? "";
 const ROOT = path.resolve(process.env.STORAGE_ROOT ?? "./storage");
-if (!API || !EMAIL || !PASSWORD) throw new Error("Configure API_URL, ADMIN_EMAIL e ADMIN_PASSWORD no apps/agent/.env");
+const CREDENTIALS = path.resolve(process.env.AGENT_CREDENTIALS ?? "./agent-credentials.json");
+if (!API) throw new Error("Configure API_URL no apps/agent/.env");
 await mkdir(ROOT, { recursive: true });
 
 type Camera = {id:string;arenaId:string;name:string;type:"rtsp"|"mjpeg";host:string;port:number;username:string;password?:string;hasPassword?:boolean;path:string;transport:"tcp"|"udp";active:boolean};
@@ -24,7 +25,15 @@ async function api<T>(route:string, init:RequestInit={}):Promise<T> {
   if(!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return (r.status===204?undefined:await r.json()) as T;
 }
-async function login(){const data=await api<{token:string}>("/api/auth/login",{method:"POST",body:JSON.stringify({email:EMAIL,password:PASSWORD})});token=data.token;console.log("[agent] autenticado na API");}
+async function loadCredentials(){try{const saved=JSON.parse(await readFile(CREDENTIALS,"utf8"));token=String(saved.token??"");}catch{}}
+async function pair(){
+  if(!PAIRING_CODE) throw new Error("Agent ainda não pareado. Gere um código no painel Developer e configure PAIRING_CODE uma única vez.");
+  const data=await api<{token:string;agentId:string}>("/api/agent/pair",{method:"POST",body:JSON.stringify({code:PAIRING_CODE,machineName:os.hostname()})});
+  token=data.token;
+  await writeFile(CREDENTIALS,JSON.stringify({token:data.token,agentId:data.agentId,apiUrl:API,pairedAt:new Date().toISOString()},null,2));
+  console.log(`[agent] pareado com sucesso (${os.hostname()})`);
+}
+async function authenticate(){await loadCredentials();if(!token)await pair();console.log("[agent] credencial própria carregada");}
 function url(c:Camera){const cred=c.username?`${encodeURIComponent(c.username)}:${encodeURIComponent(c.password??"")}@`:"";return `${c.type==="mjpeg"?"http":"rtsp"}://${cred}${c.host}:${c.port}/${c.path.replace(/^\/+/,"")}`;}
 function start(c:Camera){if(captures.has(c.id))return;const folder=path.join(ROOT,c.id,String(Date.now()));void mkdir(folder,{recursive:true});const args=["-hide_banner","-loglevel","warning",...(c.type==="rtsp"?["-rtsp_transport",c.transport]:[]),"-i",url(c),"-map","0:v:0","-an","-c:v","libx264","-preset","veryfast","-g","30","-f","segment","-segment_time","2","-reset_timestamps","1","-segment_format","matroska",path.join(folder,"ip-%09d.mkv")];const proc=spawn("ffmpeg",args);let err="";proc.stderr.on("data",x=>err=(err+x.toString()).slice(-1200));proc.on("close",code=>{captures.delete(c.id);captureErrors.set(c.id,err || `FFmpeg encerrou com código ${code}`);console.error(`[agent] câmera ${c.name} encerrou (${code}): ${err}`)});captures.set(c.id,{proc,folder,startedAt:Date.now()});captureErrors.delete(c.id);console.log(`[agent] capturando ${c.name} (${c.host})`);}
 async function runFfmpeg(args:string[]){return new Promise<void>((ok,bad)=>{const p=spawn("ffmpeg",args);let e="";p.stderr.on("data",x=>e=(e+x.toString()).slice(-800));p.on("close",c=>c===0?ok():bad(new Error(e||`FFmpeg ${c}`)));});}
@@ -56,5 +65,5 @@ async function sync(){const config=await api<{cameras:Camera[];arenas:Arena[]}>(
 async function makeReplay(job:Job, arena:Arena){const cap=captures.get(job.cameraId);if(!cap)throw new Error("Câmera ainda não está sendo capturada pelo Agent.");const names=(await readdir(cap.folder)).filter(n=>n.endsWith(".mkv")).sort();const files=[] as {p:string;t:number}[];for(const n of names.slice(0,-1)){const p=path.join(cap.folder,n);const st=await stat(p);files.push({p,t:st.mtimeMs});}const count=Math.ceil(job.seconds/2);const chosen=files.slice(-count);if(chosen.length<2)throw new Error("Buffer ainda não possui vídeo suficiente.");const list=path.join(ROOT,`${job.id}.txt`), out=path.join(ROOT,`${job.id}.mp4`);await writeFile(list,chosen.map(x=>`file '${x.p.replaceAll("'","'\\''")}'`).join("\n"));let wm:string|undefined;if(arena.watermarkUrl){try{const r=await fetch(arena.watermarkUrl);if(r.ok){wm=path.join(ROOT,`${job.id}-wm`);await writeFile(wm,Buffer.from(await r.arrayBuffer()));}}catch{}}
 const args=wm?["-f","concat","-safe","0","-i",list,"-i",wm,"-filter_complex","[1:v]scale=90:-1,format=rgba,colorchannelmixer=aa=0.40[wm];[0:v][wm]overlay=W-w-16:H-h-16","-c:v","libx264","-preset","veryfast","-movflags","+faststart","-an","-y",out]:["-f","concat","-safe","0","-i",list,"-c:v","libx264","-preset","veryfast","-movflags","+faststart","-an","-y",out];await new Promise<void>((ok,bad)=>{const p=spawn("ffmpeg",args);let e="";p.stderr.on("data",x=>e=(e+x.toString()).slice(-1500));p.on("close",c=>c===0?ok():bad(new Error(e||`FFmpeg ${c}`)));});await unlink(list).catch(()=>{});if(wm)await unlink(wm).catch(()=>{});return out;}
 async function work(){let state=await sync();try{const job=await api<Job|undefined>("/api/agent/jobs/next");if(!job)return;console.log(`[agent] replay solicitado: ${job.seconds}s`);const arena=state.arenas.find(a=>a.id===job.arenaId);if(!arena)throw new Error("Quadra do replay não encontrada.");const out=await makeReplay(job,arena);const body=await import("node:fs/promises").then(m=>m.readFile(out));await api(`/api/agent/jobs/${job.id}/complete`,{method:"POST",headers:{"content-type":"application/octet-stream"},body});await unlink(out).catch(()=>{});console.log("[agent] replay enviado com sucesso");}catch(e){if(String(e).startsWith("Error: 204"))return;console.error("[agent]",e instanceof Error?e.message:e);}}
-await login();await sync();setInterval(()=>void work().catch(async e=>{console.error(e);try{await login()}catch{}}),2000);console.log("[agent] ER Capture Agent online. Deixe esta janela aberta.");
+await authenticate();await sync();setInterval(()=>void work().catch(async e=>{console.error(e);}),2000);console.log("[agent] ER Capture Agent online. Deixe esta janela aberta.");
 process.on("SIGINT",()=>{for(const x of captures.values())x.proc.kill("SIGTERM");process.exit(0)});

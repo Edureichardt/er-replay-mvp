@@ -39,3 +39,11 @@ npm run uninstall:agent:windows
 
 ## Preview e status
 Enquanto captura, o Agent envia heartbeat a cada ciclo e uma imagem JPEG de preview aproximadamente a cada 5 segundos. O painel usa o heartbeat como estado real (`ONLINE/CAPTURANDO`) e mostra o preview sem tentar expor RTSP da rede local à internet.
+
+## Pareamento comercial do Capture Agent
+
+O Agent não precisa mais guardar e-mail/senha do administrador. No painel Developer, use **Gerar código do Agent** no cliente desejado. O código é de uso único e expira em 30 minutos.
+
+No primeiro uso do PC da arena, coloque temporariamente o código em `apps/agent/.env` como `PAIRING_CODE=ER-....` e execute o Agent. Ele troca o código por uma credencial própria e salva em `apps/agent/agent-credentials.json`. Esse arquivo é secreto e está ignorado pelo Git.
+
+Depois do primeiro pareamento, `PAIRING_CODE` pode ser removido do `.env`. O Agent usa a credencial própria em todos os heartbeats, previews, configurações e replays. Se o Developer revogar o Agent, a credencial deixa de funcionar e um novo pareamento será necessário.

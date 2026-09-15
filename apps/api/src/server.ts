@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash, randomUUID } from "node:crypto";
 import os from "node:os";
+import { authenticateAgent, createPairingCode, ensureAgentTables, listAgents, pairAgent, revokeAgent } from "./agentAuth.js";
 import {
   addReplay,
   addSegment,
@@ -78,6 +79,7 @@ const replaysRoot = path.join(storageRoot, "replays");
 await mkdir(segmentsRoot, { recursive: true });
 await mkdir(replaysRoot, { recursive: true });
 await initDatabase();
+await ensureAgentTables();
 
 const app = express();
 const port = Number(process.env.PORT ?? 3333);
@@ -153,7 +155,7 @@ const authLimiter = rateLimit({
 });
 
 const jwtSecret = process.env.JWT_SECRET ?? "er-replay-mude-esta-chave";
-type AuthRequest = express.Request & { auth?: { id: string; role: Role } };
+type AuthRequest = express.Request & { auth?: { id: string; role: Role }; agent?: { id: string; ownerId: string; machineName?: string | null } };
 function auth(requiredRole?: Role) {
   return (
     req: AuthRequest,
@@ -189,6 +191,19 @@ function auth(requiredRole?: Role) {
       res.status(401).json({ message: "Faça login para continuar." });
     }
   };
+}
+
+async function agentAuth(req: AuthRequest, res: express.Response, next: express.NextFunction) {
+  const token = req.header("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  const agent = await authenticateAgent(token);
+  if (!agent) return res.status(401).json({ message: "Capture Agent não autorizado. Faça o pareamento novamente." });
+  const owner = findUserById(agent.ownerId);
+  if (!owner || owner.role !== "admin") return res.status(401).json({ message: "Cliente do Agent não encontrado." });
+  const license = adminLicenseState(owner);
+  if (!license.allowed) return res.status(403).json({ message: "Licença da arena bloqueada ou expirada." });
+  req.agent = agent;
+  req.auth = { id: owner.id, role: "admin" };
+  next();
 }
 
 function issueToken(id: string, role: Role) {
@@ -266,6 +281,24 @@ app.get("/api/developer/overview", auth("developer"), (_req, res) =>
 app.get("/api/developer/clients", auth("developer"), (_req, res) =>
   res.json(listAdminClients()),
 );
+app.post("/api/developer/clients/:id/agent-pairing", auth("developer"), async (req, res) => {
+  const user = findUserById(String(req.params.id));
+  if (!user || user.role !== "admin") return res.status(404).json({ message: "Cliente não encontrado." });
+  res.status(201).json(await createPairingCode(user.id));
+});
+app.get("/api/developer/agents", auth("developer"), async (_req, res) => res.json(await listAgents()));
+app.post("/api/developer/agents/:id/revoke", auth("developer"), async (req, res) => {
+  const ok = await revokeAgent(String(req.params.id));
+  if (!ok) return res.status(404).json({ message: "Agent não encontrado." });
+  res.json({ ok: true });
+});
+app.post("/api/agent/pair", authLimiter, async (req, res) => {
+  const code = String(req.body?.code ?? "").trim();
+  const machineName = String(req.body?.machineName ?? "PC da arena").trim().slice(0, 100);
+  const paired = await pairAgent(code, machineName);
+  if (!paired) return res.status(400).json({ message: "Código inválido, expirado ou já utilizado." });
+  res.status(201).json({ token: paired.token, agentId: paired.agentId });
+});
 app.post("/api/developer/clients", auth("developer"), async (req, res) => {
   const name = String(req.body.name ?? "").trim();
   const email = String(req.body.email ?? "").trim().toLowerCase();
@@ -495,7 +528,7 @@ const agentHeartbeats = new Map<string, { updatedAt: number; cameras: Map<string
 const AGENT_HEARTBEAT_TTL_MS = 8_000;
 const agentPreviews = new Map<string, { data: Buffer; updatedAt: number }>();
 
-app.post("/api/agent/heartbeat", auth("admin"), async (req: AuthRequest, res) => {
+app.post("/api/agent/heartbeat", agentAuth, async (req: AuthRequest, res) => {
   const now = Date.now();
   const states = Array.isArray(req.body?.cameras) ? req.body.cameras : [];
   const cameras = new Map<string, AgentCameraHeartbeat>();
@@ -523,7 +556,7 @@ app.post("/api/agent/heartbeat", auth("admin"), async (req: AuthRequest, res) =>
 
 app.post(
   "/api/agent/cameras/:id/preview",
-  auth("admin"),
+  agentAuth,
   express.raw({ type: "image/jpeg", limit: "512kb" }),
   (req: AuthRequest, res) => {
     const camera = findCamera(String(req.params.id));
@@ -566,7 +599,7 @@ app.get("/api/admin/agent-status", auth("admin"), (req: AuthRequest, res) => {
   res.json({ agentOnline, states });
 });
 
-app.get("/api/agent/config", auth("admin"), (req: AuthRequest, res) => {
+app.get("/api/agent/config", agentAuth, (req: AuthRequest, res) => {
   const arenas = listArenas(req.auth!.id);
   const arenaIds = new Set(arenas.map((arena) => arena.id));
   const cameras = listCameras(req.auth!.id)
@@ -760,7 +793,7 @@ type AgentReplayJob = {
 };
 const agentReplayJobs = new Map<string, AgentReplayJob>();
 
-app.get("/api/agent/jobs/next", auth("admin"), (req: AuthRequest, res) => {
+app.get("/api/agent/jobs/next", agentAuth, (req: AuthRequest, res) => {
   const job = [...agentReplayJobs.values()].find((item) =>
     item.status === "pending" && adminOwnsArena(req.auth!.id, item.arenaId),
   );
@@ -772,7 +805,7 @@ app.get("/api/agent/jobs/next", auth("admin"), (req: AuthRequest, res) => {
 
 app.post(
   "/api/agent/jobs/:id/complete",
-  auth("admin"),
+  agentAuth,
   express.raw({ type: "application/octet-stream", limit: "250mb" }),
   async (req: AuthRequest, res, next) => {
     try {
@@ -811,7 +844,7 @@ app.post(
   },
 );
 
-app.post("/api/agent/jobs/:id/fail", auth("admin"), (req: AuthRequest, res) => {
+app.post("/api/agent/jobs/:id/fail", agentAuth, (req: AuthRequest, res) => {
   const job = agentReplayJobs.get(String(req.params.id));
   if (!job || !adminOwnsArena(req.auth!.id, job.arenaId))
     return res.status(404).json({ message: "Solicitação não encontrada." });

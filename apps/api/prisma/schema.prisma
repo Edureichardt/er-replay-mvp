@@ -38,6 +38,8 @@ model User {
   arenaId          String?
   arena            Arena?   @relation("ArenaPlayers", fields: [arenaId], references: [id], onDelete: SetNull)
   replays          Replay[]
+  agentPairingCodes AgentPairingCode[] @relation("AgentPairingOwner")
+  captureAgents     CaptureAgent[] @relation("CaptureAgentOwner")
   @@index([arenaId])
 }
 
@@ -96,4 +98,28 @@ model Replay {
   @@index([userId, createdAt])
   @@index([arenaId, createdAt])
   @@index([expiresAt])
+}
+
+model AgentPairingCode {
+  id        String   @id
+  ownerId   String
+  codeHash  String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  owner     User     @relation("AgentPairingOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  @@index([ownerId])
+}
+
+model CaptureAgent {
+  id          String   @id
+  ownerId     String
+  name        String
+  machineName String?
+  tokenHash   String   @unique
+  active      Boolean  @default(true)
+  lastSeenAt  DateTime?
+  createdAt   DateTime @default(now())
+  owner       User     @relation("CaptureAgentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  @@index([ownerId])
 }
