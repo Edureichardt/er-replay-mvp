@@ -490,6 +490,29 @@ app.delete("/api/developer/users/:id", auth("developer"), async (req, res) => {
 app.get("/api/admin/cameras", auth("admin"), (req: AuthRequest, res) =>
   res.json(listCameras(req.auth!.id)),
 );
+type AgentCameraHeartbeat = { running: boolean; bufferedSeconds: number; error?: string; updatedAt: number };
+const agentHeartbeats = new Map<string, { updatedAt: number; cameras: Map<string, AgentCameraHeartbeat> }>();
+const AGENT_HEARTBEAT_TTL_MS = 8_000;
+
+app.post("/api/agent/heartbeat", auth("admin"), (req: AuthRequest, res) => {
+  const now = Date.now();
+  const states = Array.isArray(req.body?.cameras) ? req.body.cameras : [];
+  const cameras = new Map<string, AgentCameraHeartbeat>();
+  for (const item of states) {
+    const id = String(item?.id ?? "");
+    const camera = findCamera(id);
+    if (!camera || !adminOwnsArena(req.auth!.id, camera.arenaId)) continue;
+    cameras.set(id, {
+      running: Boolean(item?.running),
+      bufferedSeconds: Math.max(0, Math.min(90, Number(item?.bufferedSeconds ?? 0))),
+      error: item?.error ? String(item.error).slice(0, 500) : undefined,
+      updatedAt: now,
+    });
+  }
+  agentHeartbeats.set(req.auth!.id, { updatedAt: now, cameras });
+  res.json({ ok: true, receivedAt: new Date(now).toISOString() });
+});
+
 app.get("/api/agent/config", auth("admin"), (req: AuthRequest, res) => {
   const arenas = listArenas(req.auth!.id);
   const arenaIds = new Set(arenas.map((arena) => arena.id));
@@ -563,23 +586,34 @@ app.post("/api/admin/cameras/:id/start", auth("admin"), async (req: AuthRequest,
     message: "Câmera ativada. Aguardando o ER Capture Agent iniciar a captura local.",
   });
 });
-app.post("/api/admin/cameras/:id/stop", auth("admin"), (req: AuthRequest, res) => {
+app.post("/api/admin/cameras/:id/stop", auth("admin"), async (req: AuthRequest, res) => {
   const camera = findCamera(String(req.params.id));
   if (camera && !adminOwnsArena(req.auth!.id, camera.arenaId)) return res.status(403).json({ message: "Esta câmera pertence a outro cliente." });
-  stopRtspCapture(String(req.params.id));
-  res.json({ ok: true, message: "Captura IP interrompida." });
+  if (!camera) return res.status(404).json({ message: "Câmera não encontrada." });
+  await activateArenaCamera(camera.arenaId, "");
+  res.json({ ok: true, message: "Parada solicitada ao ER Capture Agent." });
 });
 app.get("/api/admin/cameras/:id/capture-status", auth("admin"), (req: AuthRequest, res) => {
   const camera = findCamera(String(req.params.id));
   if (camera && !adminOwnsArena(req.auth!.id, camera.arenaId)) return res.status(403).json({ message: "Esta câmera pertence a outro cliente." });
-  res.json(captureStatus(String(req.params.id)));
+  if (!camera) return res.status(404).json({ message: "Câmera não encontrada." });
+  const agent = agentHeartbeats.get(req.auth!.id);
+  const state = agent?.cameras.get(camera.id);
+  const agentOnline = Boolean(agent && Date.now() - agent.updatedAt <= AGENT_HEARTBEAT_TTL_MS);
+  const fresh = Boolean(state && Date.now() - state.updatedAt <= AGENT_HEARTBEAT_TTL_MS);
+  res.json({
+    cameraId: camera.id,
+    running: Boolean(agentOnline && fresh && state?.running),
+    bufferedSeconds: agentOnline && fresh ? state?.bufferedSeconds ?? 0 : 0,
+    agentOnline,
+    error: agentOnline && fresh ? state?.error : "ER Capture Agent offline ou sem heartbeat recente.",
+  });
 });
 app.post("/api/admin/cameras/:id/activate", auth("admin"), async (req: AuthRequest, res) => {
   const camera = findCamera(String(req.params.id));
   if (camera && !adminOwnsArena(req.auth!.id, camera.arenaId)) return res.status(403).json({ message: "Esta câmera pertence a outro cliente." });
   if (!camera)
     return res.status(404).json({ message: "Câmera não encontrada." });
-  stopAllRtspCaptures();
   await activateArenaCamera(camera.arenaId, camera.id);
   res.json({ ok: true });
 });
