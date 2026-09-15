@@ -1,0 +1,9 @@
+{
+  "name": "@er-replay/agent",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {"dev":"tsx src/index.ts","build":"tsc -p tsconfig.json","start":"node dist/index.js","typecheck":"tsc -p tsconfig.json --noEmit"},
+  "dependencies": {"dotenv":"^17.2.2"},
+  "devDependencies": {"@types/node":"^24.3.0","tsx":"^4.20.5","typescript":"^5.9.2"}
+}

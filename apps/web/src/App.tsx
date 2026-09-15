@@ -473,7 +473,7 @@ function PlayerPage({ auth, logout }: { auth: AuthData; logout: () => void }) {
     setProcessing(true);
     setMessage("Estamos preparando seu replay...");
     try {
-      const replay = await api(
+      const request = await api(
         "/api/replays",
         {
           method: "POST",
@@ -485,8 +485,19 @@ function PlayerPage({ auth, logout }: { auth: AuthData; logout: () => void }) {
         },
         auth.token,
       );
-      setReplays((v) => [replay, ...v]);
-      setMessage("Replay salvo! Já está disponível abaixo.");
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const job = await api(`/api/replay-jobs/${request.jobId}`, {}, auth.token);
+        if (job.status === "failed") throw new Error(job.error || "Não foi possível gerar o replay.");
+        if (job.status === "done") {
+          setReplays(await api("/api/replays", {}, auth.token));
+          setMessage("Replay salvo! Já está disponível abaixo.");
+          return;
+        }
+        setMessage(job.status === "processing" ? "ER Capture Agent está gerando seu replay..." : "Solicitação enviada para a arena...");
+      }
+      throw new Error("O Capture Agent demorou para responder. Verifique o computador da arena.");
     } catch (e) {
       setMessage(e instanceof Error ? e.message : "Erro ao salvar.");
     } finally {

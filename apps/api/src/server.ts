@@ -490,6 +490,14 @@ app.delete("/api/developer/users/:id", auth("developer"), async (req, res) => {
 app.get("/api/admin/cameras", auth("admin"), (req: AuthRequest, res) =>
   res.json(listCameras(req.auth!.id)),
 );
+app.get("/api/agent/config", auth("admin"), (req: AuthRequest, res) => {
+  const arenas = listArenas(req.auth!.id);
+  const arenaIds = new Set(arenas.map((arena) => arena.id));
+  const cameras = listCameras(req.auth!.id)
+    .map((safe) => findCamera(safe.id))
+    .filter((camera) => camera && arenaIds.has(camera.arenaId));
+  res.json({ arenas, cameras });
+});
 app.post("/api/admin/cameras", auth("admin"), async (req: AuthRequest, res) => {
   const arena =
     findArenaById(String(req.body.arenaId ?? "")) ??
@@ -675,95 +683,109 @@ app.get("/api/stream/status/:cameraId", (req, res) =>
   res.json(bufferStatus(req.params.cameraId)),
 );
 
-app.post("/api/replays", auth(), async (req: AuthRequest, res, next) => {
-  try {
-    const arena = findArena(String(req.body.arenaCode ?? "QUADRA01"));
-    if (!arena)
-      return res.status(404).json({ message: "Quadra não encontrada." });
-    const cameraId = String(req.body.cameraId ?? "").trim();
-    if (!cameraId)
-      return res.status(400).json({
-        message: "Este botão não está vinculado a uma câmera. Abra novamente o botão da quadra pelo painel administrativo.",
-      });
+type AgentReplayJob = {
+  id: string;
+  arenaId: string;
+  arenaCode: string;
+  cameraId: string;
+  userId: string;
+  seconds: number;
+  status: "pending" | "processing" | "done" | "failed";
+  createdAt: string;
+  claimedAt?: string;
+  replayId?: string;
+  error?: string;
+};
+const agentReplayJobs = new Map<string, AgentReplayJob>();
 
-    const camera = findCamera(cameraId);
-    if (!camera || camera.arenaId !== arena.id)
-      return res.status(404).json({
-        message: "A câmera vinculada a este botão não pertence a esta quadra ou foi removida.",
-      });
+app.get("/api/agent/jobs/next", auth("admin"), (req: AuthRequest, res) => {
+  const job = [...agentReplayJobs.values()].find((item) =>
+    item.status === "pending" && adminOwnsArena(req.auth!.id, item.arenaId),
+  );
+  if (!job) return res.status(204).send();
+  job.status = "processing";
+  job.claimedAt = new Date().toISOString();
+  res.json(job);
+});
 
-    // Nunca fazemos fallback para outra câmera. Se o admin trocou a câmera ativa
-    // desta quadra, uma tela antiga deve falhar em vez de salvar a fonte errada.
-    if (arena.cameraId !== cameraId)
-      return res.status(409).json({
-        message: "Esta câmera não está mais ativa nesta quadra. Abra novamente o botão da quadra para usar a câmera atual.",
-      });
-
-    const capture = captureStatus(cameraId);
-    if (!capture.running)
-      return res.status(409).json({
-        message: "A câmera desta quadra está sem captura ativa. Inicie a câmera no painel antes de salvar o replay.",
-      });
-
-    const seconds = Math.max(
-      6,
-      Math.min(60, Number(req.body.seconds ?? arena.defaultSeconds)),
-    );
-    const { segments, durationMs } = getRecentSegments(cameraId, seconds);
-    if (segments.length < 2)
-      return res.status(409).json({
-        message: "Ainda não há vídeo suficiente. Aguarde alguns segundos.",
-      });
-
-    const id = randomUUID();
-    const filename = `replay-${cameraId}-${Date.now()}.mp4`;
-    const outputPath = path.join(replaysRoot, filename);
-    const listPath = path.join(replaysRoot, `${id}.txt`);
-    let watermarkPath: string | undefined;
-    if (arena.watermarkUrl) {
-      const watermarkResponse = await fetch(arena.watermarkUrl);
-      if (watermarkResponse.ok) {
-        watermarkPath = path.join(replaysRoot, `${id}-watermark`);
-        await writeFile(
-          watermarkPath,
-          Buffer.from(await watermarkResponse.arrayBuffer()),
-        );
+app.post(
+  "/api/agent/jobs/:id/complete",
+  auth("admin"),
+  express.raw({ type: "application/octet-stream", limit: "250mb" }),
+  async (req: AuthRequest, res, next) => {
+    try {
+      const job = agentReplayJobs.get(String(req.params.id));
+      if (!job || !adminOwnsArena(req.auth!.id, job.arenaId))
+        return res.status(404).json({ message: "Solicitação de replay não encontrada." });
+      if (!Buffer.isBuffer(req.body) || req.body.length < 1000)
+        return res.status(400).json({ message: "Vídeo do replay vazio." });
+      const arena = findArenaById(job.arenaId);
+      if (!arena) return res.status(404).json({ message: "Quadra não encontrada." });
+      const id = randomUUID();
+      const filename = `replay-${job.cameraId}-${Date.now()}.mp4`;
+      const outputPath = path.join(replaysRoot, filename);
+      await writeFile(outputPath, req.body);
+      const createdAt = new Date();
+      const expiresAt = new Date(createdAt.getTime() + arena.retentionDays * 86400000).toISOString();
+      let url = `/replays/${filename}`;
+      let cloudPublicId: string | undefined;
+      if (cloudStorageEnabled()) {
+        const cloud = await uploadReplay(outputPath, `replay-${id}`);
+        url = cloud.url;
+        cloudPublicId = cloud.cloudPublicId;
+        await unlink(outputPath).catch(() => undefined);
       }
-    }
-    await createReplayVideo(segments, listPath, outputPath, watermarkPath);
-    if (watermarkPath) await unlink(watermarkPath).catch(() => undefined);
-    await unlink(listPath).catch(() => undefined);
+      const replay = {
+        id, cameraId: job.cameraId, arenaId: job.arenaId, userId: job.userId,
+        seconds: job.seconds, createdAt: createdAt.toISOString(), expiresAt,
+        filename, url, cloudPublicId,
+      };
+      addReplay(replay);
+      await persistReplay(replay);
+      job.status = "done";
+      job.replayId = id;
+      res.status(201).json(replay);
+    } catch (error) { next(error); }
+  },
+);
 
-    const createdAt = new Date();
-    const expiresAt = new Date(
-      createdAt.getTime() + arena.retentionDays * 24 * 60 * 60 * 1000,
-    ).toISOString();
-    let url = `/replays/${filename}`;
-    let cloudPublicId: string | undefined;
-    if (cloudStorageEnabled()) {
-      const cloud = await uploadReplay(outputPath, `replay-${id}`);
-      url = cloud.url;
-      cloudPublicId = cloud.cloudPublicId;
-      await unlink(outputPath).catch(() => undefined);
-    }
-    const replay = {
-      id,
-      cameraId,
-      arenaId: arena.id,
-      userId: req.auth!.id,
-      seconds: Math.round(durationMs / 1000),
-      createdAt: createdAt.toISOString(),
-      expiresAt,
-      filename,
-      url,
-      cloudPublicId,
-    };
-    addReplay(replay);
-    await persistReplay(replay);
-    res.status(201).json(replay);
-  } catch (error) {
-    next(error);
-  }
+app.post("/api/agent/jobs/:id/fail", auth("admin"), (req: AuthRequest, res) => {
+  const job = agentReplayJobs.get(String(req.params.id));
+  if (!job || !adminOwnsArena(req.auth!.id, job.arenaId))
+    return res.status(404).json({ message: "Solicitação não encontrada." });
+  job.status = "failed";
+  job.error = String(req.body?.message ?? "Falha ao gerar replay.").slice(0, 500);
+  res.json({ ok: true });
+});
+
+app.get("/api/replay-jobs/:id", auth(), (req: AuthRequest, res) => {
+  const job = agentReplayJobs.get(String(req.params.id));
+  if (!job || (req.auth!.role === "player" && job.userId !== req.auth!.id))
+    return res.status(404).json({ message: "Solicitação não encontrada." });
+  res.json(job);
+});
+
+app.post("/api/replays", auth(), async (req: AuthRequest, res) => {
+  const arena = findArena(String(req.body.arenaCode ?? "QUADRA01"));
+  if (!arena) return res.status(404).json({ message: "Quadra não encontrada." });
+  const cameraId = String(req.body.cameraId ?? "").trim();
+  if (!cameraId) return res.status(400).json({ message: "Este botão não está vinculado a uma câmera." });
+  const camera = findCamera(cameraId);
+  if (!camera || camera.arenaId !== arena.id)
+    return res.status(404).json({ message: "A câmera vinculada não pertence a esta quadra." });
+  if (arena.cameraId !== cameraId)
+    return res.status(409).json({ message: "Esta câmera não está mais ativa nesta quadra. Abra novamente o botão da quadra." });
+  const seconds = Math.max(6, Math.min(60, Number(req.body.seconds ?? arena.defaultSeconds)));
+  const job: AgentReplayJob = {
+    id: randomUUID(), arenaId: arena.id, arenaCode: arena.code, cameraId,
+    userId: req.auth!.id, seconds, status: "pending", createdAt: new Date().toISOString(),
+  };
+  agentReplayJobs.set(job.id, job);
+  setTimeout(() => {
+    const current = agentReplayJobs.get(job.id);
+    if (current && current.status === "pending") { current.status = "failed"; current.error = "ER Capture Agent offline ou sem resposta."; }
+  }, 45_000).unref();
+  res.status(202).json({ jobId: job.id, status: job.status });
 });
 
 app.get("/api/replays", auth(), (req: AuthRequest, res) =>
