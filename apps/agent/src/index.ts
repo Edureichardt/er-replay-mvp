@@ -17,6 +17,7 @@ type Capture = {proc:ChildProcessWithoutNullStreams;folder:string;startedAt:numb
 const captures = new Map<string,Capture>();
 const captureErrors = new Map<string,string>();
 let token = "";
+const lastPreviewAt = new Map<string, number>();
 
 async function api<T>(route:string, init:RequestInit={}):Promise<T> {
   const r=await fetch(`${API}${route}`,{...init,headers:{...(init.body && typeof init.body === "string"?{"content-type":"application/json"}:{}),...(token?{authorization:`Bearer ${token}`}:{}) ,...(init.headers??{})}});
@@ -26,6 +27,18 @@ async function api<T>(route:string, init:RequestInit={}):Promise<T> {
 async function login(){const data=await api<{token:string}>("/api/auth/login",{method:"POST",body:JSON.stringify({email:EMAIL,password:PASSWORD})});token=data.token;console.log("[agent] autenticado na API");}
 function url(c:Camera){const cred=c.username?`${encodeURIComponent(c.username)}:${encodeURIComponent(c.password??"")}@`:"";return `${c.type==="mjpeg"?"http":"rtsp"}://${cred}${c.host}:${c.port}/${c.path.replace(/^\/+/,"")}`;}
 function start(c:Camera){if(captures.has(c.id))return;const folder=path.join(ROOT,c.id,String(Date.now()));void mkdir(folder,{recursive:true});const args=["-hide_banner","-loglevel","warning",...(c.type==="rtsp"?["-rtsp_transport",c.transport]:[]),"-i",url(c),"-map","0:v:0","-an","-c:v","libx264","-preset","veryfast","-g","30","-f","segment","-segment_time","2","-reset_timestamps","1","-segment_format","matroska",path.join(folder,"ip-%09d.mkv")];const proc=spawn("ffmpeg",args);let err="";proc.stderr.on("data",x=>err=(err+x.toString()).slice(-1200));proc.on("close",code=>{captures.delete(c.id);captureErrors.set(c.id,err || `FFmpeg encerrou com código ${code}`);console.error(`[agent] câmera ${c.name} encerrou (${code}): ${err}`)});captures.set(c.id,{proc,folder,startedAt:Date.now()});captureErrors.delete(c.id);console.log(`[agent] capturando ${c.name} (${c.host})`);}
+async function runFfmpeg(args:string[]){return new Promise<void>((ok,bad)=>{const p=spawn("ffmpeg",args);let e="";p.stderr.on("data",x=>e=(e+x.toString()).slice(-800));p.on("close",c=>c===0?ok():bad(new Error(e||`FFmpeg ${c}`)));});}
+async function sendPreview(c:Camera,cap:Capture){
+  const now=Date.now(); if(now-(lastPreviewAt.get(c.id)??0)<5000)return; lastPreviewAt.set(c.id,now);
+  try{
+    const names=(await readdir(cap.folder)).filter(n=>n.endsWith(".mkv")).sort(); const latest=names.at(-2)??names.at(-1); if(!latest)return;
+    const jpg=path.join(ROOT,`preview-${c.id}.jpg`);
+    await runFfmpeg(["-hide_banner","-loglevel","error","-i",path.join(cap.folder,latest),"-frames:v","1","-vf","scale=640:-2","-q:v","6","-y",jpg]);
+    const body=await import("node:fs/promises").then(m=>m.readFile(jpg));
+    await api(`/api/agent/cameras/${c.id}/preview`,{method:"POST",headers:{"content-type":"image/jpeg"},body});
+    await unlink(jpg).catch(()=>{});
+  }catch(e){console.error(`[agent] preview ${c.name}:`,e instanceof Error?e.message:e);}
+}
 async function heartbeat(cams:Camera[]){
   const states=[] as {id:string;running:boolean;bufferedSeconds:number;error?:string}[];
   for(const c of cams){
@@ -35,6 +48,7 @@ async function heartbeat(cams:Camera[]){
       try{const names=(await readdir(cap.folder)).filter(n=>n.endsWith(".mkv"));bufferedSeconds=Math.min(90,Math.max(0,(names.length-1)*2));}catch{}
     }
     states.push({id:c.id,running:Boolean(cap),bufferedSeconds,error:captureErrors.get(c.id)});
+    if(cap) void sendPreview(c,cap);
   }
   await api("/api/agent/heartbeat",{method:"POST",body:JSON.stringify({cameras:states})});
 }

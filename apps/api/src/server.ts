@@ -493,8 +493,9 @@ app.get("/api/admin/cameras", auth("admin"), (req: AuthRequest, res) =>
 type AgentCameraHeartbeat = { running: boolean; bufferedSeconds: number; error?: string; updatedAt: number };
 const agentHeartbeats = new Map<string, { updatedAt: number; cameras: Map<string, AgentCameraHeartbeat> }>();
 const AGENT_HEARTBEAT_TTL_MS = 8_000;
+const agentPreviews = new Map<string, { data: Buffer; updatedAt: number }>();
 
-app.post("/api/agent/heartbeat", auth("admin"), (req: AuthRequest, res) => {
+app.post("/api/agent/heartbeat", auth("admin"), async (req: AuthRequest, res) => {
   const now = Date.now();
   const states = Array.isArray(req.body?.cameras) ? req.body.cameras : [];
   const cameras = new Map<string, AgentCameraHeartbeat>();
@@ -502,15 +503,67 @@ app.post("/api/agent/heartbeat", auth("admin"), (req: AuthRequest, res) => {
     const id = String(item?.id ?? "");
     const camera = findCamera(id);
     if (!camera || !adminOwnsArena(req.auth!.id, camera.arenaId)) continue;
+    const running = Boolean(item?.running);
+    const error = item?.error ? String(item.error).slice(0, 500) : undefined;
     cameras.set(id, {
-      running: Boolean(item?.running),
+      running,
       bufferedSeconds: Math.max(0, Math.min(90, Number(item?.bufferedSeconds ?? 0))),
-      error: item?.error ? String(item.error).slice(0, 500) : undefined,
+      error,
       updatedAt: now,
     });
+    // O heartbeat do Agent é a fonte real do estado da câmera. Persistimos
+    // apenas quando muda para não gravar no banco a cada 2 segundos.
+    const nextStatus = running ? "online" : error ? "offline" : camera.status;
+    if (nextStatus !== camera.status) await updateCameraStatus(camera.id, nextStatus, error);
   }
   agentHeartbeats.set(req.auth!.id, { updatedAt: now, cameras });
   res.json({ ok: true, receivedAt: new Date(now).toISOString() });
+});
+
+
+app.post(
+  "/api/agent/cameras/:id/preview",
+  auth("admin"),
+  express.raw({ type: "image/jpeg", limit: "512kb" }),
+  (req: AuthRequest, res) => {
+    const camera = findCamera(String(req.params.id));
+    if (!camera || !adminOwnsArena(req.auth!.id, camera.arenaId))
+      return res.status(404).json({ message: "Câmera não encontrada." });
+    if (!Buffer.isBuffer(req.body) || req.body.length === 0)
+      return res.status(400).json({ message: "Preview inválido." });
+    agentPreviews.set(camera.id, { data: req.body, updatedAt: Date.now() });
+    res.json({ ok: true });
+  },
+);
+
+app.get("/api/admin/cameras/:id/preview", auth("admin"), (req: AuthRequest, res) => {
+  const camera = findCamera(String(req.params.id));
+  if (!camera || !adminOwnsArena(req.auth!.id, camera.arenaId))
+    return res.status(404).json({ message: "Câmera não encontrada." });
+  const preview = agentPreviews.get(camera.id);
+  if (!preview || Date.now() - preview.updatedAt > 15_000)
+    return res.status(204).send();
+  res.json({
+    updatedAt: new Date(preview.updatedAt).toISOString(),
+    dataUrl: `data:image/jpeg;base64,${preview.data.toString("base64")}`,
+  });
+});
+
+app.get("/api/admin/agent-status", auth("admin"), (req: AuthRequest, res) => {
+  const agent = agentHeartbeats.get(req.auth!.id);
+  const agentOnline = Boolean(agent && Date.now() - agent.updatedAt <= AGENT_HEARTBEAT_TTL_MS);
+  const states = listCameras(req.auth!.id).map((camera) => {
+    const state = agent?.cameras.get(camera.id);
+    const fresh = Boolean(state && Date.now() - state.updatedAt <= AGENT_HEARTBEAT_TTL_MS);
+    return {
+      cameraId: camera.id,
+      agentOnline,
+      running: Boolean(agentOnline && fresh && state?.running),
+      bufferedSeconds: agentOnline && fresh ? state?.bufferedSeconds ?? 0 : 0,
+      error: agentOnline && fresh ? state?.error : undefined,
+    };
+  });
+  res.json({ agentOnline, states });
 });
 
 app.get("/api/agent/config", auth("admin"), (req: AuthRequest, res) => {

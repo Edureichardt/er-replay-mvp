@@ -4,6 +4,7 @@ import {
   Building2,
   Camera,
   CheckCircle2,
+  Copy,
   CircleStop,
   Download,
   ExternalLink,
@@ -14,6 +15,7 @@ import {
   LayoutDashboard,
   LogIn,
   LogOut,
+  Maximize2,
   KeyRound,
   Pencil,
   Play,
@@ -30,6 +32,7 @@ import {
   Users,
   Video,
   Wifi,
+  X,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { FormEvent, useCallback, useEffect, useState } from "react";
@@ -576,13 +579,28 @@ function CourtOverview({ token, webBase }: { token: string; webBase: string }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Arena | null>(null);
   const [notice, setNotice] = useState("");
+  const [live, setLive] = useState<Record<string, {running:boolean;bufferedSeconds:number;agentOnline:boolean}>>({});
+  const [previews, setPreviews] = useState<Record<string,string>>({});
+  const [qrModal, setQrModal] = useState<{name:string;url:string}|null>(null);
+  const [cameraModal, setCameraModal] = useState<{name:string;src:string}|null>(null);
   const load = useCallback(() => {
     void Promise.all([
       api("/api/admin/arenas", {}, token),
       api("/api/admin/cameras", {}, token),
-    ]).then(([a, c]) => {
+    ]).then(async ([a, c]) => {
       setArenas(a);
       setCameras(c);
+      try {
+        const status = await api("/api/admin/agent-status", {}, token) as {states:{cameraId:string;running:boolean;bufferedSeconds:number;agentOnline:boolean}[]};
+        setLive(Object.fromEntries(status.states.map(x => [x.cameraId, x])));
+        const entries = await Promise.all((c as CameraSource[]).map(async camera => {
+          try {
+            const preview = await api(`/api/admin/cameras/${camera.id}/preview`, {}, token) as {dataUrl?:string}|undefined;
+            return [camera.id, preview?.dataUrl ?? ""] as const;
+          } catch { return [camera.id, ""] as const; }
+        }));
+        setPreviews(Object.fromEntries(entries));
+      } catch {}
     });
   }, [token]);
   useEffect(() => {
@@ -765,19 +783,15 @@ function CourtOverview({ token, webBase }: { token: string; webBase: string }) {
       {notice && <div className="camera-notice">{notice}</div>}
       <div className="security-grid">
         {arenas.map((arena) => {
-          const camera =
-            cameras.find((item) => item.id === arena.cameraId) ??
-            cameras.find((item) => item.arenaId === arena.id);
-          const preview =
-            camera?.type === "mjpeg" && location.protocol === "http:"
-              ? `http://${camera.host}:${camera.port}/${camera.path}`
-              : "";
-          const qr = `${webBase}/?arena=${arena.code}${camera?.id ? `&camera=${encodeURIComponent(camera.id)}` : ""}`;
+          const camera = cameras.find((item) => item.id === arena.cameraId);
+          const state = camera ? live[camera.id] : undefined;
+          const preview = camera ? previews[camera.id] ?? "" : "";
+          const qr = camera ? `${webBase}/?arena=${encodeURIComponent(arena.code)}&camera=${encodeURIComponent(camera.id)}` : "";
           return (
             <article key={arena.id}>
               <div className="security-feed">
                 {preview ? (
-                  <img src={preview} alt={arena.name} />
+                  <button type="button" className="camera-preview-button" onClick={() => setCameraModal({name: `${arena.name} • ${camera?.name ?? "Câmera"}`, src: preview})} title="Clique para ampliar a câmera"><img src={preview} alt={`Preview de ${arena.name}`} /><span><Maximize2 /> Ver câmera</span></button>
                 ) : (
                   <div>
                     <Camera />
@@ -790,39 +804,55 @@ function CourtOverview({ token, webBase }: { token: string; webBase: string }) {
                     </span>
                   </div>
                 )}
-                <span className={`feed-status ${camera?.status ?? "untested"}`}>
+                <span className={`feed-status ${state?.running ? "online" : camera ? "untested" : "offline"}`}>
                   <i />
-                  {camera?.status === "online"
-                    ? "ONLINE"
-                    : camera
-                      ? "CADASTRADA"
-                      : "SEM CÂMERA"}
+                  {state?.running ? "ONLINE • CAPTURANDO" : state?.agentOnline && camera ? "AGUARDANDO CÂMERA" : camera ? "AGENT OFFLINE" : "SEM CÂMERA"}
                 </span>
               </div>
               <div className="court-row">
                 <div>
                   <strong>{arena.name}</strong>
                   <small>
-                    {camera?.name ?? "Adicione uma fonte de vídeo"} • replay de{" "}
-                    {arena.defaultSeconds}s
+                    {camera?.name ?? (arena.cameraId ? "Câmera ativa não encontrada" : "Selecione uma câmera ativa")} • replay de{" "}
+                    {arena.defaultSeconds}s{state?.running ? ` • buffer ${state.bufferedSeconds}s` : ""}
                   </small>
                 </div>
-                <div className="mini-qr">
+                {qr ? <button type="button" className="mini-qr qr-button" onClick={() => setQrModal({name: arena.name, url: qr})}>
                   <QRCodeSVG value={qr} size={54} />
-                  <span className="qr-tooltip">QR {arena.name}</span>
-                </div>
+                  <span className="qr-tooltip">Ampliar QR {arena.name}</span>
+                </button> : null}
               </div>
               <button className="edit-court" onClick={() => setEditing(arena)}>
                 <Pencil />
                 Editar quadra
               </button>
-              <a href={qr} target="_blank">
-                Abrir botão da quadra <ExternalLink />
-              </a>
+              {qr ? <div className="court-access-actions">
+                <a href={qr} target="_blank" rel="noreferrer">Abrir acesso <ExternalLink /></a>
+                <button type="button" onClick={() => { void navigator.clipboard.writeText(qr); setNotice("Link da quadra copiado."); }}><Copy /> Copiar link</button>
+                <button type="button" onClick={() => setQrModal({name: arena.name, url: qr})}><Maximize2 /> QR grande</button>
+                {typeof navigator.share === "function" ? <button type="button" onClick={() => void navigator.share({title:`ER Replay • ${arena.name}`,url:qr})}><Share2 /> Compartilhar</button> : null}
+              </div> : <div className="camera-notice compact">Ative uma câmera para liberar QR e link desta quadra.</div>}
             </article>
           );
         })}
       </div>
+      {cameraModal && <div className="camera-view-modal" role="dialog" aria-modal="true" onClick={() => setCameraModal(null)}>
+        <div className="camera-view-card" onClick={e => e.stopPropagation()}>
+          <button className="qr-close" onClick={() => setCameraModal(null)}><X /></button>
+          <div className="camera-view-head"><span><i /> PREVIEW DA CÂMERA</span><strong>{cameraModal.name}</strong><small>Imagem atualizada automaticamente pelo ER Capture Agent</small></div>
+          <img src={cameraModal.src} alt={cameraModal.name} />
+        </div>
+      </div>}
+      {qrModal && <div className="qr-modal" role="dialog" aria-modal="true" onClick={() => setQrModal(null)}>
+        <div className="qr-modal-card" onClick={e => e.stopPropagation()}>
+          <button className="qr-close" onClick={() => setQrModal(null)}><X /></button>
+          <span className="eyebrow">ACESSO DO JOGADOR</span>
+          <h3>{qrModal.name}</h3>
+          <div className="qr-large"><QRCodeSVG value={qrModal.url} size={280} /></div>
+          <p>Escaneie para abrir o botão de replay desta quadra.</p>
+          <button className="primary" onClick={() => { void navigator.clipboard.writeText(qrModal.url); setNotice("Link da quadra copiado."); }}><Copy /> Copiar link</button>
+        </div>
+      </div>}
     </section>
   );
 }
@@ -1132,59 +1162,25 @@ function CameraManager({
 
 function CameraStatusPanel({ token }: { token: string }) {
   const [cameras, setCameras] = useState<CameraSource[]>([]);
+  const [live, setLive] = useState<Record<string, {running:boolean;bufferedSeconds:number;agentOnline:boolean;error?:string}>>({});
   const load = useCallback(() => {
-    void api("/api/admin/cameras", {}, token).then(setCameras);
+    void Promise.all([api("/api/admin/cameras", {}, token), api("/api/admin/agent-status", {}, token)]).then(([cams, status]) => {
+      setCameras(cams as CameraSource[]);
+      const states = (status as {states:{cameraId:string;running:boolean;bufferedSeconds:number;agentOnline:boolean;error?:string}[]}).states ?? [];
+      setLive(Object.fromEntries(states.map(x => [x.cameraId, x])));
+    }).catch(() => {});
   }, [token]);
-  useEffect(() => {
-    load();
-    const timer = setInterval(load, 5000);
-    return () => clearInterval(timer);
-  }, [load]);
-  return (
-    <section className="camera-health">
-      <div className="section-title">
-        <div>
-          <span>DIAGNÓSTICO</span>
-          <h2>Status das câmeras</h2>
-        </div>
-        <Activity />
-      </div>
-      <div className="health-grid">
-        {cameras.length ? (
-          cameras.map((camera) => (
-            <article key={camera.id} className={camera.status}>
-              <div>
-                <Camera />
-                <i />
-              </div>
-              <span>
-                <strong>{camera.name}</strong>
-                <small>
-                  {camera.status === "online"
-                    ? "Conectada e disponível"
-                    : camera.status === "offline"
-                      ? (camera.lastError ?? "Sem conexão")
-                      : "Ainda não testada"}
-                </small>
-              </span>
-              <em>
-                {camera.status === "online"
-                  ? "ONLINE"
-                  : camera.status === "offline"
-                    ? "OFFLINE"
-                    : "TESTAR"}
-              </em>
-            </article>
-          ))
-        ) : (
-          <div className="empty compact">
-            <Camera />
-            <strong>Nenhuma câmera cadastrada</strong>
-          </div>
-        )}
-      </div>
-    </section>
-  );
+  useEffect(() => { load(); const timer=setInterval(load,3000); return()=>clearInterval(timer); }, [load]);
+  return <section className="camera-health">
+    <div className="section-title"><div><span>DIAGNÓSTICO</span><h2>Status das câmeras</h2></div><Activity /></div>
+    <div className="health-grid">{cameras.length ? cameras.map(camera => {
+      const state=live[camera.id]; const online=Boolean(state?.running); const agent=Boolean(state?.agentOnline);
+      return <article key={camera.id} className={online ? "online" : agent ? "untested" : "offline"}>
+        <div><Camera /><i /></div><span><strong>{camera.name}</strong><small>{online ? `Capturando • buffer ${state.bufferedSeconds}s` : agent ? (state?.error ?? "Agent online • aguardando captura") : "Capture Agent offline"}</small></span>
+        <em>{online ? "ONLINE" : agent ? "AGUARDANDO" : "OFFLINE"}</em>
+      </article>;
+    }) : <div className="empty compact"><Camera /><strong>Nenhuma câmera cadastrada</strong></div>}</div>
+  </section>;
 }
 
 function BrandingSettings({ token }: { token: string }) {

@@ -14,7 +14,9 @@
     "beta:api": "npm run start -w @er-replay/api",
     "dev:agent": "npm run dev -w @er-replay/agent",
     "build:agent": "npm run build -w @er-replay/agent",
-    "typecheck:agent": "npm run typecheck -w @er-replay/agent"
+    "typecheck:agent": "npm run typecheck -w @er-replay/agent",
+    "install:agent:windows": "npm run install:windows -w @er-replay/agent",
+    "uninstall:agent:windows": "npm run uninstall:windows -w @er-replay/agent"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

@@ -23,3 +23,19 @@ Agent: permanece no PC da arena e deve ficar aberto durante o uso.
 
 ## Limitação beta
 A fila de pedidos de replay está em memória na API. Se o Render reiniciar exatamente durante um pedido, aquele pedido falha e pode ser solicitado novamente. Para produção, mover a fila para Neon/Redis.
+
+## Inicialização automática no Windows
+Depois de configurar `apps/agent/.env`, na raiz do projeto execute uma vez:
+
+```powershell
+npm run install:agent:windows
+```
+
+O Agent será compilado, registrado no Agendador de Tarefas e iniciado automaticamente quando o usuário entrar no Windows, em janela oculta. O log fica em `apps/agent/agent.log`. Para remover a inicialização automática:
+
+```powershell
+npm run uninstall:agent:windows
+```
+
+## Preview e status
+Enquanto captura, o Agent envia heartbeat a cada ciclo e uma imagem JPEG de preview aproximadamente a cada 5 segundos. O painel usa o heartbeat como estado real (`ONLINE/CAPTURANDO`) e mostra o preview sem tentar expor RTSP da rede local à internet.
