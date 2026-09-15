@@ -531,62 +531,37 @@ app.post("/api/admin/cameras", auth("admin"), async (req: AuthRequest, res) => {
 });
 app.post("/api/admin/cameras/:id/test", auth("admin"), async (req: AuthRequest, res) => {
   const camera = findCamera(String(req.params.id));
-  if (camera && !adminOwnsArena(req.auth!.id, camera.arenaId)) return res.status(403).json({ message: "Esta câmera pertence a outro cliente." });
+  if (camera && !adminOwnsArena(req.auth!.id, camera.arenaId))
+    return res.status(403).json({ message: "Esta câmera pertence a outro cliente." });
   if (!camera)
     return res.status(404).json({ message: "Câmera não encontrada." });
-  const credentials = camera.username
-    ? `${encodeURIComponent(camera.username)}:${encodeURIComponent(camera.password)}@`
-    : "";
-  const protocol = camera.type === "mjpeg" ? "http" : "rtsp";
-  const url = `${protocol}://${credentials}${camera.host}:${camera.port}/${camera.path}`;
-  try {
-    await testVideoStream(
-      url,
-      camera.type === "rtsp" ? camera.transport : undefined,
-    );
-    await updateCameraStatus(camera.id, "online");
-    res.json({ ok: true, message: "Câmera conectada e vídeo encontrado." });
-  } catch (error) {
-    const message =
-      error instanceof Error && error.message.startsWith("Tempo limite")
-        ? error.message
-        : "Não foi possível acessar o vídeo. Confira IP, usuário, senha e caminho RTSP.";
-    await updateCameraStatus(camera.id, "offline", message);
-    res.status(422).json({ message });
-  }
+
+  // Em produção a câmera está na LAN da arena. O Render não consegue testar
+  // 192.168.x.x diretamente; quem valida/captura é o ER Capture Agent local.
+  await updateCameraStatus(camera.id, "untested");
+  res.json({
+    ok: true,
+    delegatedToAgent: true,
+    message: "Câmera cadastrada. O teste/captura será feito pelo ER Capture Agent da arena.",
+  });
 });
 app.post("/api/admin/cameras/:id/start", auth("admin"), async (req: AuthRequest, res) => {
   const camera = findCamera(String(req.params.id));
-  if (camera && !adminOwnsArena(req.auth!.id, camera.arenaId)) return res.status(403).json({ message: "Esta câmera pertence a outro cliente." });
+  if (camera && !adminOwnsArena(req.auth!.id, camera.arenaId))
+    return res.status(403).json({ message: "Esta câmera pertence a outro cliente." });
   if (!camera || camera.type === "webcam")
     return res.status(404).json({ message: "Câmera IP não encontrada." });
-  const credentials = camera.username
-    ? `${encodeURIComponent(camera.username)}:${encodeURIComponent(camera.password)}@`
-    : "";
-  const protocol = camera.type === "mjpeg" ? "http" : "rtsp";
-  const url = `${protocol}://${credentials}${camera.host}:${camera.port}/${camera.path}`;
-  try {
-    await testVideoStream(
-      url,
-      camera.type === "rtsp" ? camera.transport : undefined,
-    );
-    await activateArenaCamera(camera.arenaId, camera.id);
-    const status = await startRtspCapture(camera, segmentsRoot);
-    await updateCameraStatus(camera.id, "online");
-    res.json({
-      ...status,
-      message: "Captura IP iniciada. Aguarde o buffer carregar.",
-    });
-  } catch {
-    await updateCameraStatus(
-      camera.id,
-      "offline",
-      "Não foi possível iniciar o stream RTSP.",
-    );
-    res.status(422).json({
-      message: "Não foi possível iniciar. Revise os dados e teste a conexão.",
-    });
-  }
+
+  // Apenas seleciona a câmera na API. O Agent consulta /api/agent/config a cada
+  // poucos segundos e inicia o FFmpeg dentro da rede local da arena.
+  await activateArenaCamera(camera.arenaId, camera.id);
+  await updateCameraStatus(camera.id, "untested");
+  res.json({
+    ok: true,
+    delegatedToAgent: true,
+    cameraId: camera.id,
+    message: "Câmera ativada. Aguardando o ER Capture Agent iniciar a captura local.",
+  });
 });
 app.post("/api/admin/cameras/:id/stop", auth("admin"), (req: AuthRequest, res) => {
   const camera = findCamera(String(req.params.id));
