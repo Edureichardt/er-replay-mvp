@@ -1640,6 +1640,7 @@ function DeveloperPage({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState("");
+  const [pairingCode, setPairingCode] = useState<{ clientName: string; code: string; expiresAt: string } | null>(null);
 
   const load = useCallback(() => {
     Promise.all([
@@ -1721,14 +1722,14 @@ function DeveloperPage({
   }
 
   async function generateAgentCode(client: DeveloperClient) {
-    setBusy(`pair-${client.id}`); setError("");
+    setBusy(`pair-${client.id}`); setError(""); setNotice("");
     try {
       const result = await api(`/api/developer/clients/${client.id}/agent-pairing`, { method: "POST" }, auth.token);
-      const expires = new Date(result.expiresAt).toLocaleTimeString("pt-BR", {hour:"2-digit",minute:"2-digit"});
-      setNotice(`Código do Agent para ${client.name}: ${result.code} • válido até ${expires}. Use uma única vez no PC da arena.`);
-      try { await navigator.clipboard.writeText(result.code); } catch {}
-    } catch (error) { setError(error instanceof Error ? error.message : "Erro ao gerar código do Agent."); }
-    finally { setBusy(""); }
+      if (!result?.code || !result?.expiresAt) throw new Error("A API não retornou o código de pareamento.");
+      setPairingCode({ clientName: client.name, code: String(result.code), expiresAt: String(result.expiresAt) });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Erro ao gerar código do Capture Agent.");
+    } finally { setBusy(""); }
   }
 
   async function revokeCaptureAgent(agent: CaptureAgentInfo) {
@@ -1767,6 +1768,19 @@ function DeveloperPage({
       </section>
       {error && <div className="camera-notice dev-notice">{error}</div>}
       {notice && <div className="camera-notice dev-notice success">{notice}</div>}
+
+      {pairingCode && (
+        <div className="qr-modal" role="dialog" aria-modal="true" onClick={() => setPairingCode(null)}>
+          <div className="qr-modal-card" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className="qr-close" onClick={() => setPairingCode(null)}><X /></button>
+            <span className="eyebrow">ER CAPTURE AGENT</span><h3>Código de pareamento</h3>
+            <p>Vincule o computador de <strong>{pairingCode.clientName}</strong>. Código de uso único.</p>
+            <div style={{fontSize:"2rem",fontWeight:900,letterSpacing:".12em",textAlign:"center",padding:"22px 14px",margin:"16px 0",borderRadius:16,background:"rgba(255,255,255,.06)",wordBreak:"break-word"}}>{pairingCode.code}</div>
+            <p>Válido até <strong>{new Date(pairingCode.expiresAt).toLocaleTimeString("pt-BR", {hour:"2-digit",minute:"2-digit"})}</strong>.</p>
+            <button type="button" className="primary" onClick={async () => { try { await navigator.clipboard.writeText(pairingCode.code); setNotice("Código copiado."); } catch { window.prompt("Copie o código:", pairingCode.code); } }}><Copy /> COPIAR CÓDIGO</button>
+          </div>
+        </div>
+      )}
 
       <section className="developer-stats">
         <article><Users /><span><strong>{clients.length}</strong><small>Clientes</small></span></article>
@@ -1817,7 +1831,7 @@ function DeveloperPage({
                 <div className="license-actions">
                   <button className="pay" disabled={busy === client.id} onClick={() => void renew(client)}><CheckCircle2 /> CONFIRMAR PAGAMENTO</button>
                   <button disabled={busy === client.id} onClick={() => void resetClientPassword(client)}><KeyRound /> NOVA SENHA</button>
-                  <button disabled={busy === `pair-${client.id}`} onClick={() => void generateAgentCode(client)}><Radio /> GERAR CÓDIGO AGENT</button>
+                  <button type="button" disabled={busy === `pair-${client.id}`} onClick={() => void generateAgentCode(client)}><Radio /> {busy === `pair-${client.id}` ? "GERANDO..." : "GERAR CÓDIGO AGENT"}</button>
                   <button className={client.accessActive === false ? "unlock" : "block"} disabled={busy === client.id} onClick={() => void toggleAccess(client)}>{client.accessActive === false ? <Play /> : <CircleStop />} {client.accessActive === false ? "DESBLOQUEAR" : "BLOQUEAR"}</button>
                 </div>
               </article>
