@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash, randomUUID } from "node:crypto";
 import os from "node:os";
-import { authenticateAgent, createPairingCode, ensureAgentTables, listAgents, pairAgent, revokeAgent } from "./agentAuth.js";
+import { authenticateAgent, createPairingCode, ensureAgentTables, listAgents, pairAgent, revokeAgent, createReplayJob, claimNextReplayJob, getReplayJob, finishReplayJob, failReplayJob, expirePendingReplayJobs } from "./agentAuth.js";
 import {
   addReplay,
   addSegment,
@@ -778,29 +778,12 @@ app.get("/api/stream/status/:cameraId", (req, res) =>
   res.json(bufferStatus(req.params.cameraId)),
 );
 
-type AgentReplayJob = {
-  id: string;
-  arenaId: string;
-  arenaCode: string;
-  cameraId: string;
-  userId: string;
-  seconds: number;
-  status: "pending" | "processing" | "done" | "failed";
-  createdAt: string;
-  claimedAt?: string;
-  replayId?: string;
-  error?: string;
-};
-const agentReplayJobs = new Map<string, AgentReplayJob>();
-
-app.get("/api/agent/jobs/next", agentAuth, (req: AuthRequest, res) => {
-  const job = [...agentReplayJobs.values()].find((item) =>
-    item.status === "pending" && adminOwnsArena(req.auth!.id, item.arenaId),
-  );
-  if (!job) return res.status(204).send();
-  job.status = "processing";
-  job.claimedAt = new Date().toISOString();
-  res.json(job);
+app.get("/api/agent/jobs/next", agentAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const job = await claimNextReplayJob(req.auth!.id);
+    if (!job) return res.status(204).send();
+    res.json(job);
+  } catch (error) { next(error); }
 });
 
 app.post(
@@ -809,9 +792,11 @@ app.post(
   express.raw({ type: "application/octet-stream", limit: "250mb" }),
   async (req: AuthRequest, res, next) => {
     try {
-      const job = agentReplayJobs.get(String(req.params.id));
-      if (!job || !adminOwnsArena(req.auth!.id, job.arenaId))
+      const job = await getReplayJob(String(req.params.id));
+      if (!job || job.ownerId !== req.auth!.id)
         return res.status(404).json({ message: "Solicitação de replay não encontrada." });
+      if (job.status === "done" && job.replayId)
+        return res.status(409).json({ message: "Este replay já foi concluído." });
       if (!Buffer.isBuffer(req.body) || req.body.length < 1000)
         return res.status(400).json({ message: "Vídeo do replay vazio." });
       const arena = findArenaById(job.arenaId);
@@ -826,61 +811,57 @@ app.post(
       let cloudPublicId: string | undefined;
       if (cloudStorageEnabled()) {
         const cloud = await uploadReplay(outputPath, `replay-${id}`);
-        url = cloud.url;
-        cloudPublicId = cloud.cloudPublicId;
+        url = cloud.url; cloudPublicId = cloud.cloudPublicId;
         await unlink(outputPath).catch(() => undefined);
       }
-      const replay = {
-        id, cameraId: job.cameraId, arenaId: job.arenaId, userId: job.userId,
-        seconds: job.seconds, createdAt: createdAt.toISOString(), expiresAt,
-        filename, url, cloudPublicId,
-      };
+      const replay = { id, cameraId: job.cameraId, arenaId: job.arenaId, userId: job.userId, seconds: job.seconds, createdAt: createdAt.toISOString(), expiresAt, filename, url, cloudPublicId };
       addReplay(replay);
       await persistReplay(replay);
-      job.status = "done";
-      job.replayId = id;
+      await finishReplayJob(job.id, id);
       res.status(201).json(replay);
     } catch (error) { next(error); }
   },
 );
 
-app.post("/api/agent/jobs/:id/fail", agentAuth, (req: AuthRequest, res) => {
-  const job = agentReplayJobs.get(String(req.params.id));
-  if (!job || !adminOwnsArena(req.auth!.id, job.arenaId))
-    return res.status(404).json({ message: "Solicitação não encontrada." });
-  job.status = "failed";
-  job.error = String(req.body?.message ?? "Falha ao gerar replay.").slice(0, 500);
-  res.json({ ok: true });
+app.post("/api/agent/jobs/:id/fail", agentAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const job = await getReplayJob(String(req.params.id));
+    if (!job || job.ownerId !== req.auth!.id)
+      return res.status(404).json({ message: "Solicitação não encontrada." });
+    await failReplayJob(job.id, String(req.body?.message ?? "Falha ao gerar replay."));
+    res.json({ ok: true });
+  } catch (error) { next(error); }
 });
 
-app.get("/api/replay-jobs/:id", auth(), (req: AuthRequest, res) => {
-  const job = agentReplayJobs.get(String(req.params.id));
-  if (!job || (req.auth!.role === "player" && job.userId !== req.auth!.id))
-    return res.status(404).json({ message: "Solicitação não encontrada." });
-  res.json(job);
+app.get("/api/replay-jobs/:id", auth(), async (req: AuthRequest, res, next) => {
+  try {
+    await expirePendingReplayJobs();
+    const job = await getReplayJob(String(req.params.id));
+    if (!job) return res.status(404).json({ message: "Solicitação não encontrada." });
+    if (req.auth!.role === "player" && job.userId !== req.auth!.id)
+      return res.status(404).json({ message: "Solicitação não encontrada." });
+    if (req.auth!.role === "admin" && job.ownerId !== req.auth!.id)
+      return res.status(404).json({ message: "Solicitação não encontrada." });
+    res.json(job);
+  } catch (error) { next(error); }
 });
 
-app.post("/api/replays", auth(), async (req: AuthRequest, res) => {
-  const arena = findArena(String(req.body.arenaCode ?? "QUADRA01"));
-  if (!arena) return res.status(404).json({ message: "Quadra não encontrada." });
-  const cameraId = String(req.body.cameraId ?? "").trim();
-  if (!cameraId) return res.status(400).json({ message: "Este botão não está vinculado a uma câmera." });
-  const camera = findCamera(cameraId);
-  if (!camera || camera.arenaId !== arena.id)
-    return res.status(404).json({ message: "A câmera vinculada não pertence a esta quadra." });
-  if (arena.cameraId !== cameraId)
-    return res.status(409).json({ message: "Esta câmera não está mais ativa nesta quadra. Abra novamente o botão da quadra." });
-  const seconds = Math.max(6, Math.min(60, Number(req.body.seconds ?? arena.defaultSeconds)));
-  const job: AgentReplayJob = {
-    id: randomUUID(), arenaId: arena.id, arenaCode: arena.code, cameraId,
-    userId: req.auth!.id, seconds, status: "pending", createdAt: new Date().toISOString(),
-  };
-  agentReplayJobs.set(job.id, job);
-  setTimeout(() => {
-    const current = agentReplayJobs.get(job.id);
-    if (current && current.status === "pending") { current.status = "failed"; current.error = "ER Capture Agent offline ou sem resposta."; }
-  }, 45_000).unref();
-  res.status(202).json({ jobId: job.id, status: job.status });
+app.post("/api/replays", auth(), async (req: AuthRequest, res, next) => {
+  try {
+    const arena = findArena(String(req.body.arenaCode ?? "QUADRA01"));
+    if (!arena) return res.status(404).json({ message: "Quadra não encontrada." });
+    const cameraId = String(req.body.cameraId ?? "").trim();
+    if (!cameraId) return res.status(400).json({ message: "Este botão não está vinculado a uma câmera." });
+    const camera = findCamera(cameraId);
+    if (!camera || camera.arenaId !== arena.id)
+      return res.status(404).json({ message: "A câmera vinculada não pertence a esta quadra." });
+    if (arena.cameraId !== cameraId)
+      return res.status(409).json({ message: "Esta câmera não está mais ativa nesta quadra. Abra novamente o botão da quadra." });
+    if (!arena.ownerId) return res.status(409).json({ message: "Esta quadra ainda não está vinculada a um cliente." });
+    const seconds = Math.max(6, Math.min(60, Number(req.body.seconds ?? arena.defaultSeconds)));
+    const job = await createReplayJob({ id: randomUUID(), ownerId: arena.ownerId, arenaId: arena.id, arenaCode: arena.code, cameraId, userId: req.auth!.id, seconds });
+    res.status(202).json({ jobId: job.id, status: job.status });
+  } catch (error) { next(error); }
 });
 
 app.get("/api/replays", auth(), (req: AuthRequest, res) =>

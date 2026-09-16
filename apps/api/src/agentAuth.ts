@@ -26,6 +26,23 @@ export async function ensureAgentTables() {
       "createdAt" timestamptz NOT NULL DEFAULT now()
     );
     CREATE INDEX IF NOT EXISTS "CaptureAgent_ownerId_idx" ON "CaptureAgent"("ownerId");
+    CREATE TABLE IF NOT EXISTS "ReplayJob" (
+      "id" text PRIMARY KEY,
+      "ownerId" text NOT NULL REFERENCES "User"("id") ON DELETE CASCADE,
+      "arenaId" text NOT NULL REFERENCES "Arena"("id") ON DELETE CASCADE,
+      "arenaCode" text NOT NULL,
+      "cameraId" text NOT NULL REFERENCES "Camera"("id") ON DELETE CASCADE,
+      "userId" text NOT NULL REFERENCES "User"("id") ON DELETE CASCADE,
+      "seconds" integer NOT NULL,
+      "status" text NOT NULL DEFAULT 'pending',
+      "createdAt" timestamptz NOT NULL DEFAULT now(),
+      "claimedAt" timestamptz,
+      "finishedAt" timestamptz,
+      "replayId" text,
+      "error" text
+    );
+    CREATE INDEX IF NOT EXISTS "ReplayJob_owner_status_created_idx" ON "ReplayJob"("ownerId","status","createdAt");
+    CREATE INDEX IF NOT EXISTS "ReplayJob_user_created_idx" ON "ReplayJob"("userId","createdAt");
   `);
 }
 
@@ -80,3 +97,22 @@ export async function revokeAgent(id: string) {
   const result = await pool.query(`UPDATE "CaptureAgent" SET "active"=false WHERE "id"=$1 RETURNING "id"`, [id]);
   return Boolean(result.rowCount);
 }
+
+
+export type PersistentReplayJob = {
+  id:string; ownerId:string; arenaId:string; arenaCode:string; cameraId:string; userId:string;
+  seconds:number; status:"pending"|"processing"|"done"|"failed"; createdAt:string;
+  claimedAt?:string; finishedAt?:string; replayId?:string; error?:string;
+};
+function mapReplayJob(r:any):PersistentReplayJob{return {id:r.id,ownerId:r.ownerId,arenaId:r.arenaId,arenaCode:r.arenaCode,cameraId:r.cameraId,userId:r.userId,seconds:r.seconds,status:r.status,createdAt:new Date(r.createdAt).toISOString(),claimedAt:r.claimedAt?new Date(r.claimedAt).toISOString():undefined,finishedAt:r.finishedAt?new Date(r.finishedAt).toISOString():undefined,replayId:r.replayId??undefined,error:r.error??undefined};}
+export async function createReplayJob(job:{id:string;ownerId:string;arenaId:string;arenaCode:string;cameraId:string;userId:string;seconds:number}){
+  const r=await pool.query(`INSERT INTO "ReplayJob" ("id","ownerId","arenaId","arenaCode","cameraId","userId","seconds") VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,[job.id,job.ownerId,job.arenaId,job.arenaCode,job.cameraId,job.userId,job.seconds]); return mapReplayJob(r.rows[0]);
+}
+export async function claimNextReplayJob(ownerId:string){
+  await pool.query(`UPDATE "ReplayJob" SET "status"='pending',"claimedAt"=NULL,"error"=NULL WHERE "ownerId"=$1 AND "status"='processing' AND "claimedAt" < now()-interval '90 seconds'`,[ownerId]);
+  const r=await pool.query(`WITH next AS (SELECT "id" FROM "ReplayJob" WHERE "ownerId"=$1 AND "status"='pending' ORDER BY "createdAt" ASC FOR UPDATE SKIP LOCKED LIMIT 1) UPDATE "ReplayJob" j SET "status"='processing',"claimedAt"=now() FROM next WHERE j."id"=next."id" RETURNING j.*`,[ownerId]); return r.rows[0]?mapReplayJob(r.rows[0]):null;
+}
+export async function getReplayJob(id:string){const r=await pool.query(`SELECT * FROM "ReplayJob" WHERE "id"=$1 LIMIT 1`,[id]);return r.rows[0]?mapReplayJob(r.rows[0]):null;}
+export async function finishReplayJob(id:string,replayId:string){await pool.query(`UPDATE "ReplayJob" SET "status"='done',"replayId"=$2,"finishedAt"=now(),"error"=NULL WHERE "id"=$1`,[id,replayId]);}
+export async function failReplayJob(id:string,message:string){await pool.query(`UPDATE "ReplayJob" SET "status"='failed',"error"=$2,"finishedAt"=now() WHERE "id"=$1`,[id,message.slice(0,500)]);}
+export async function expirePendingReplayJobs(){await pool.query(`UPDATE "ReplayJob" SET "status"='failed',"error"='ER Capture Agent offline ou sem resposta.',"finishedAt"=now() WHERE "status"='pending' AND "createdAt" < now()-interval '45 seconds'`);}

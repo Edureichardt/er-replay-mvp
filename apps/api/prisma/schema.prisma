@@ -40,6 +40,8 @@ model User {
   replays          Replay[]
   agentPairingCodes AgentPairingCode[] @relation("AgentPairingOwner")
   captureAgents     CaptureAgent[] @relation("CaptureAgentOwner")
+  ownedReplayJobs   ReplayJob[] @relation("ReplayJobOwner")
+  replayJobs        ReplayJob[] @relation("ReplayJobUser")
   @@index([arenaId])
 }
 
@@ -58,6 +60,7 @@ model Arena {
   cameras        Camera[]
   replays        Replay[]
   players        User[]   @relation("ArenaPlayers")
+  replayJobs     ReplayJob[]
   @@index([ownerId])
 }
 
@@ -79,6 +82,7 @@ model Camera {
   lastError String?
   createdAt DateTime @default(now())
   replays Replay[]
+  replayJobs ReplayJob[]
 }
 
 model Replay {
@@ -122,4 +126,27 @@ model CaptureAgent {
   createdAt   DateTime @default(now())
   owner       User     @relation("CaptureAgentOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   @@index([ownerId])
+}
+
+
+model ReplayJob {
+  id         String   @id
+  ownerId    String
+  arenaId    String
+  arenaCode  String
+  cameraId   String
+  userId     String
+  seconds    Int
+  status     String   @default("pending")
+  createdAt  DateTime @default(now())
+  claimedAt  DateTime?
+  finishedAt DateTime?
+  replayId   String?
+  error      String?
+  owner      User     @relation("ReplayJobOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  arena      Arena    @relation(fields: [arenaId], references: [id], onDelete: Cascade)
+  camera     Camera   @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  user       User     @relation("ReplayJobUser", fields: [userId], references: [id], onDelete: Cascade)
+  @@index([ownerId, status, createdAt])
+  @@index([userId, createdAt])
 }

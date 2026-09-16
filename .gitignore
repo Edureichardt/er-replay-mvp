@@ -14,3 +14,7 @@ apps/api/storage/database.json
 apps/api/storage/replays/*
 !apps/api/storage/replays/.gitkeep
 apps/agent/agent-credentials.json
+
+# ER Capture Agent - arquivos gerados pelo instalador
+apps/agent/installer/payload/
+apps/agent/installer/output/
