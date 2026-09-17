@@ -525,7 +525,7 @@ app.get("/api/admin/cameras", auth("admin"), (req: AuthRequest, res) =>
 );
 type AgentCameraHeartbeat = { running: boolean; bufferedSeconds: number; error?: string; updatedAt: number };
 const agentHeartbeats = new Map<string, { updatedAt: number; cameras: Map<string, AgentCameraHeartbeat> }>();
-const AGENT_HEARTBEAT_TTL_MS = 8_000;
+const AGENT_HEARTBEAT_TTL_MS = 30_000;
 const agentPreviews = new Map<string, { data: Buffer; updatedAt: number }>();
 
 app.post("/api/agent/heartbeat", agentAuth, async (req: AuthRequest, res) => {
@@ -549,7 +549,8 @@ app.post("/api/agent/heartbeat", agentAuth, async (req: AuthRequest, res) => {
     const nextStatus = running ? "online" : error ? "offline" : camera.status;
     if (nextStatus !== camera.status) await updateCameraStatus(camera.id, nextStatus, error);
   }
-  agentHeartbeats.set(req.auth!.id, { updatedAt: now, cameras });
+  agentHeartbeats.set(req.agent!.ownerId, { updatedAt: now, cameras });
+
   res.json({ ok: true, receivedAt: new Date(now).toISOString() });
 });
 

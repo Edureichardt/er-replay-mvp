@@ -90,6 +90,24 @@ let token = "";
 
 /*
 =========================================
+CONFIGURAÇÃO
+=========================================
+*/
+
+const API_TIMEOUT_MS = 15_000;
+const WORK_INTERVAL_MS = 2_000;
+const STARTUP_RETRY_MS = 5_000;
+
+let shuttingDown = false;
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/*
+=========================================
 API
 =========================================
 */
@@ -98,42 +116,68 @@ async function api<T>(
   route: string,
   init: RequestInit = {}
 ): Promise<T> {
-  const response = await fetch(
-    `${API}${route}`,
-    {
-      ...init,
+  const controller = new AbortController();
 
-      headers: {
-        ...(init.body &&
-        typeof init.body === "string"
-          ? {
-              "content-type":
-                "application/json",
-            }
-          : {}),
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, API_TIMEOUT_MS);
 
-        ...(token
-          ? {
-              authorization: `Bearer ${token}`,
-            }
-          : {}),
+  try {
+    const response = await fetch(
+      `${API}${route}`,
+      {
+        ...init,
 
-        ...(init.headers ?? {}),
-      },
-    }
-  );
+        signal: controller.signal,
 
-  if (!response.ok) {
-    throw new Error(
-      `${response.status} ${await response.text()}`
+        headers: {
+          ...(init.body &&
+          typeof init.body === "string"
+            ? {
+                "content-type":
+                  "application/json",
+              }
+            : {}),
+
+          ...(token
+            ? {
+                authorization:
+                  `Bearer ${token}`,
+              }
+            : {}),
+
+          ...(init.headers ?? {}),
+        },
+      }
     );
-  }
 
-  return (
-    response.status === 204
-      ? undefined
-      : await response.json()
-  ) as T;
+    if (!response.ok) {
+      throw new Error(
+        `${response.status} ${await response.text()}`
+      );
+    }
+
+    return (
+      response.status === 204
+        ? undefined
+        : await response.json()
+    ) as T;
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.name === "AbortError"
+    ) {
+      throw new Error(
+        `Timeout da API após ${
+          API_TIMEOUT_MS / 1000
+        }s em ${route}`
+      );
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /*
@@ -439,7 +483,7 @@ async function sendPreview(
   try {
     /*
      * Caso a pasta ainda não esteja disponível,
-     * simplesmente aguardamos o próximo heartbeat.
+     * aguardamos o próximo ciclo.
      */
     const names = (
       await readdir(
@@ -490,17 +534,10 @@ async function sendPreview(
         continue;
       }
 
-      /*
-       * Ignora arquivos vazios ou incompletos.
-       */
       if (info.size < 1024) {
         continue;
       }
 
-      /*
-       * Dá uma margem depois da última
-       * alteração do arquivo.
-       */
       if (
         now - info.mtimeMs <
         1000
@@ -513,10 +550,6 @@ async function sendPreview(
       break;
     }
 
-    /*
-     * Ainda não existe segmento seguro.
-     * Tentaremos novamente depois.
-     */
     if (!selected) {
       return;
     }
@@ -574,10 +607,6 @@ async function sendPreview(
         }
       );
     } finally {
-      /*
-       * Mesmo se upload falhar,
-       * removemos o JPG temporário.
-       */
       await unlink(jpg).catch(
         () => {}
       );
@@ -1134,6 +1163,13 @@ PROCESSAR JOB
 */
 
 async function work() {
+  /*
+   * O sync atualiza configuração,
+   * mantém as capturas e envia heartbeat.
+   *
+   * Este work nunca será executado
+   * simultaneamente com outro work.
+   */
   const state =
     await sync();
 
@@ -1240,33 +1276,108 @@ async function work() {
 
 /*
 =========================================
-INICIALIZAÇÃO
+INICIALIZAÇÃO RESILIENTE
 =========================================
 */
 
-await authenticate();
+async function startAgent() {
+  /*
+   * O Agent não deve morrer se o Windows
+   * iniciar antes da internet/rede.
+   */
+  while (!shuttingDown) {
+    try {
+      await authenticate();
+      break;
+    } catch (error) {
+      console.error(
+        "[agent] falha ao iniciar:",
+        error instanceof Error
+          ? error.message
+          : error
+      );
 
-await sync();
+      console.log(
+        `[agent] nova tentativa em ${
+          STARTUP_RETRY_MS / 1000
+        }s`
+      );
 
-void cleanupOldCaptureFolders();
+      await sleep(
+        STARTUP_RETRY_MS
+      );
+    }
+  }
 
-setInterval(
-  () =>
-    void cleanupOldCaptureFolders(),
-  30 * 60 * 1000
-);
+  if (shuttingDown) {
+    return;
+  }
 
-setInterval(
-  () =>
-    void work().catch(
-      (error) =>
-        console.error(error)
-    ),
-  2000
-);
+  /*
+   * Tentamos a primeira sincronização,
+   * mas uma falha aqui não encerra o Agent.
+   */
+  try {
+    await sync();
+  } catch (error) {
+    console.error(
+      "[agent] sincronização inicial:",
+      error instanceof Error
+        ? error.message
+        : error
+    );
+  }
 
-console.log(
-  "[agent] ER Capture Agent online. Deixe esta janela aberta."
+  void cleanupOldCaptureFolders();
+
+  setInterval(
+    () => {
+      void cleanupOldCaptureFolders();
+    },
+    30 * 60 * 1000
+  );
+
+  console.log(
+    "[agent] ER Capture Agent online. Deixe esta janela aberta."
+  );
+
+  /*
+   * LOOP PRINCIPAL
+   *
+   * Não usamos setInterval para work().
+   *
+   * Um ciclo precisa terminar antes
+   * de o próximo começar.
+   */
+  while (!shuttingDown) {
+    try {
+      await work();
+    } catch (error) {
+      console.error(
+        "[agent] comunicação com API:",
+        error instanceof Error
+          ? error.message
+          : error
+      );
+    }
+
+    if (!shuttingDown) {
+      await sleep(
+        WORK_INTERVAL_MS
+      );
+    }
+  }
+}
+
+void startAgent().catch(
+  (error) => {
+    console.error(
+      "[agent] erro inesperado:",
+      error instanceof Error
+        ? error.message
+        : error
+    );
+  }
 );
 
 /*
@@ -1275,18 +1386,37 @@ ENCERRAMENTO
 =========================================
 */
 
+function shutdown() {
+  if (shuttingDown) {
+    return;
+  }
+
+  shuttingDown = true;
+
+  console.log(
+    "[agent] encerrando..."
+  );
+
+  for (
+    const capture
+    of captures.values()
+  ) {
+    capture.proc.kill(
+      "SIGTERM"
+    );
+  }
+
+  setTimeout(() => {
+    process.exit(0);
+  }, 1000);
+}
+
 process.on(
   "SIGINT",
-  () => {
-    for (
-      const capture
-      of captures.values()
-    ) {
-      capture.proc.kill(
-        "SIGTERM"
-      );
-    }
+  shutdown
+);
 
-    process.exit(0);
-  }
+process.on(
+  "SIGTERM",
+  shutdown
 );

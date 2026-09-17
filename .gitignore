@@ -18,3 +18,8 @@ apps/agent/agent-credentials.json
 # ER Capture Agent - arquivos gerados pelo instalador
 apps/agent/installer/payload/
 apps/agent/installer/output/
+
+# ER Capture Agent runtime
+apps/agent/storage/
+apps/agent/agent.log
+apps/agent/agent-credentials.json
