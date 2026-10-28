@@ -1850,7 +1850,7 @@ function DeveloperPage({
               <div><strong>{agent.machineName || agent.name}</strong><small>{client?.name || "Cliente"}</small></div>
               <em className={agent.online ? "online" : "offline"}>{agent.active ? (agent.online ? "ONLINE" : "OFFLINE") : "REVOGADO"}</em>
               <span>Último contato: {agent.lastSeenAt ? new Date(agent.lastSeenAt).toLocaleString("pt-BR") : "—"}</span>
-              {agent.active && <button disabled={busy === `agent-${agent.id}`} onClick={() => void revokeCaptureAgent(agent)}><CircleStop /> REVOGAR</button>}
+              {agent.active && <button disabled={busy === `agent-${agent.id}`} onClick={() => void revokeCaptureAgent(agent)}><CircleStop /> REVGAR</button>}
             </article>;
           })}
           {!agents.length && <div className="empty-license">Nenhum Capture Agent pareado ainda.</div>}
