@@ -959,37 +959,61 @@ function CameraManager({
       setBusy("");
     }
   }
-  useEffect(() => {
-    const activeIds = Object.keys(captureBuffers);
-    if (!activeIds.length) return;
-    const timer = window.setInterval(() => {
-      void Promise.all(
-        activeIds.map(async (id) => ({
-          id,
-          data: await api(`/api/admin/cameras/${id}/capture-status`, {}, token),
-        })),
-      ).then((results) => {
-        setCaptureBuffers((current) => {
-          const next = { ...current };
-          for (const { id, data } of results) {
-            if (data.running) next[id] = data.bufferedSeconds;
-            else delete next[id];
-          }
-          return next;
-        });
-        const latest = results.at(-1);
-        if (latest?.data.running)
-          onActive(
-            cameras.find((item) => item.id === latest.id) ?? null,
-            latest.data.bufferedSeconds,
-          );
-        const failed = results.find((item) => !item.data.running);
-        if (failed)
-          setNotice(failed.data.error || "Uma captura foi interrompida.");
-      });
-    }, 2000);
-    return () => clearInterval(timer);
-  }, [captureBuffers, token, cameras, onActive]);
+
+useEffect(() => {
+  if (!cameras.length) return;
+
+  let cancelled = false;
+
+  async function refreshCaptureStatus() {
+    const results = await Promise.allSettled(
+      cameras.map(async (camera) => ({
+        camera,
+        data: await api(
+          `/api/admin/cameras/${camera.id}/capture-status`,
+          {},
+          token,
+        ),
+      })),
+    );
+
+    if (cancelled) return;
+
+    const nextBuffers: Record<string, number> = {};
+    let activeCamera: CameraSource | null = null;
+    let activeSeconds = 0;
+
+    for (const result of results) {
+      if (result.status !== "fulfilled") continue;
+
+      const { camera, data } = result.value;
+
+      if (data.running) {
+        nextBuffers[camera.id] = data.bufferedSeconds ?? 0;
+
+        if (!activeCamera) {
+          activeCamera = camera;
+          activeSeconds = data.bufferedSeconds ?? 0;
+        }
+      }
+    }
+
+    setCaptureBuffers(nextBuffers);
+    onActive(activeCamera, activeSeconds);
+  }
+
+  void refreshCaptureStatus();
+
+  const timer = window.setInterval(() => {
+    void refreshCaptureStatus();
+  }, 2000);
+
+  return () => {
+    cancelled = true;
+    window.clearInterval(timer);
+  };
+}, [cameras, token, onActive]);
+
   async function remove(camera: CameraSource) {
     if (!confirm(`Remover ${camera.name}?`)) return;
     setBusy(camera.id);
