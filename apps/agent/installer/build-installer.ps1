@@ -87,8 +87,8 @@ Write-Host "[5/5] Compilando Setup.exe..." -ForegroundColor Cyan
 & $iscc (Join-Path $installerDir "ER-Capture-Agent.iss")
 if ($LASTEXITCODE -ne 0) { throw "Falha ao compilar com Inno Setup." }
 
-$setup = Join-Path $output "ER-Capture-Agent-Setup-v1.0.exe"
-if (!(Test-Path $setup)) { throw "ER-Capture-Agent-Setup-v1.0.exe nao foi gerado." }
+$setup = Join-Path $output "ER-Capture-Agent-Setup-v1.2.exe"
+if (!(Test-Path $setup)) { throw "ER-Capture-Agent-Setup-v1.2.exe nao foi gerado." }
 
 Write-Host ""
 Write-Host "==========================================" -ForegroundColor Green

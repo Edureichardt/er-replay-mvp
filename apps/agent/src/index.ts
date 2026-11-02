@@ -250,8 +250,12 @@ async function pair() {
 async function authenticate() {
   await loadCredentials();
 
-  if (!token) {
+  if (PAIRING_CODE) {
     await pair();
+  } else if (!token) {
+    throw new Error(
+      "Agent ainda nao pareado. Abra o Gerenciador e informe um codigo."
+    );
   }
 
   console.log(
@@ -1206,28 +1210,40 @@ async function work() {
       );
     }
 
-    const out =
-      await makeReplay(
-        job,
-        arena
-      );
+    const inicioReplay = Date.now();
+
+const out =
+  await makeReplay(
+    job,
+    arena
+  );
+
+console.log(
+  `[tempo] Geracao do MP4: ${((Date.now() - inicioReplay) / 1000).toFixed(2)}s`
+);
 
     const body =
       await readFile(out);
 
-    await api(
-      `/api/agent/jobs/${job.id}/complete`,
-      {
-        method: "POST",
+    const inicioUpload = Date.now();
 
-        headers: {
-          "content-type":
-            "application/octet-stream",
-        },
+await api(
+  `/api/agent/jobs/${job.id}/complete`,
+  {
+    method: "POST",
 
-        body,
-      }
-    );
+    headers: {
+      "content-type":
+        "application/octet-stream",
+    },
+
+    body,
+  }
+);
+
+console.log(
+  `[tempo] Upload e resposta da API: ${((Date.now() - inicioUpload) / 1000).toFixed(2)}s`
+);
 
     await unlink(
       out
